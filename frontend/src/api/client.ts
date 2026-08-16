@@ -81,8 +81,9 @@ export function createJob(
   company: string,
   description: string,
   reqId: string,
+  url: string,
 ): Promise<Job> {
-  return request('/jobs', 'POST', { title, company, description, reqId })
+  return request('/jobs', 'POST', { title, company, description, reqId, url })
 }
 
 // everyone who applied to this job and where each of them stands, which is what the app exists

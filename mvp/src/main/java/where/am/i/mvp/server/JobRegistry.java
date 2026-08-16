@@ -3,6 +3,7 @@ package where.am.i.mvp.server;
 import where.am.i.mvp.entities.Job;
 
 import java.io.IOException;
+import java.net.URL;
 import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
 import java.util.List;
@@ -18,10 +19,11 @@ public class JobRegistry {
     }
 
     public String createJob(String title,
-                          String company,
-                          String description,
-                          String reqId) throws NoSuchAlgorithmException, IOException {
-        Job job = new Job(title, company, description, reqId);
+                            String company,
+                            String description,
+                            String reqId,
+                            URL url) throws NoSuchAlgorithmException, IOException {
+        Job job = new Job(title, company, description, reqId, url);
         if (jobIdToJob.containsKey(job.getId())) {
             throw new IOException("Job already exists");
         }

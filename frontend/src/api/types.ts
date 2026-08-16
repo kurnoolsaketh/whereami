@@ -11,12 +11,14 @@ export interface User {
 // comes from GET /api/stages, so adding one to the enum needs no change here
 export type Stage = string
 
+// url is not optional: the backend rejects a job without one, so every job it hands back has it
 export interface Job {
   jobId: string
   title: string
   company: string
   description: string
   reqId: string
+  url: string
 }
 
 // the position, not the stage name, says where someone stands - a pipeline may repeat a round

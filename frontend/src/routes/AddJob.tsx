@@ -11,6 +11,7 @@ export function AddJob() {
   const [company, setCompany] = useState('')
   const [description, setDescription] = useState('')
   const [reqId, setReqId] = useState('')
+  const [url, setUrl] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -19,7 +20,7 @@ export function AddJob() {
     setError(null)
     setBusy(true)
     try {
-      await createJob(title.trim(), company.trim(), description.trim(), reqId.trim())
+      await createJob(title.trim(), company.trim(), description.trim(), reqId.trim(), url.trim())
       navigate('/jobs')
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Could not add that job')
@@ -59,6 +60,18 @@ export function AddJob() {
           <label>
             Req id
             <input value={reqId} onChange={(event) => setReqId(event.target.value)} required />
+          </label>
+          <label>
+            Job posting URL
+            {/* type=url so the browser insists on a scheme before the request is sent. the
+                backend rejects a bad one too - this only saves the round trip */}
+            <input
+              type="url"
+              value={url}
+              onChange={(event) => setUrl(event.target.value)}
+              placeholder="https://..."
+              required
+            />
           </label>
           <button type="submit" disabled={busy}>
             {busy ? 'Adding...' : 'Add job'}

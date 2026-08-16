@@ -12,6 +12,9 @@ import where.am.i.mvp.server.JobRegistry;
 import where.am.i.mvp.server.PipelineService;
 
 import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.URL;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
@@ -39,8 +42,24 @@ public class JobController {
     public JobResponse createJob(@RequestBody CreateJobRequest request)
             throws NoSuchAlgorithmException, IOException {
         String jobId = jobRegistry.createJob(
-                request.title(), request.company(), request.description(), request.reqId());
+                request.title(), request.company(), request.description(), request.reqId(),
+                parseUrl(request.url()));
         return JobResponse.from(jobRegistry.getJob(jobId));
+    }
+
+    // IOException because that is how the rest of this codebase signals a rejected input, and
+    // ApiExceptionHandler already turns it into a 400 with a message. left unguarded, a missing
+    // url NPEs and a scheme-less one throws IllegalArgumentException, both of which reach the
+    // client as a 500 with no body to explain it
+    private static URL parseUrl(String url) throws IOException {
+        if (url == null || url.isBlank()) {
+            throw new IOException("url is required");
+        }
+        try {
+            return new URI(url).toURL();
+        } catch (URISyntaxException | IllegalArgumentException e) {
+            throw new IOException("url is not a valid absolute URL: " + url);
+        }
     }
 
     @GetMapping("/{jobId}")

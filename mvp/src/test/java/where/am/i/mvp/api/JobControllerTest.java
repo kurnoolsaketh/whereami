@@ -31,7 +31,7 @@ public class JobControllerTest {
         String response = mockMvc.perform(post("/api/jobs")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"title": "%s", "company": "%s", "description": "yo mama", "reqId": "1234"}"""
+                                {"title": "%s", "company": "%s", "description": "yo mama", "reqId": "1234", "url": "https://bumco.example/jobs/1234"}"""
                                 .formatted(title, company)))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
@@ -43,13 +43,35 @@ public class JobControllerTest {
         mockMvc.perform(post("/api/jobs")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"title": "swe", "company": "bumco", "description": "yo mama", "reqId": "1234"}"""))
+                                {"title": "swe", "company": "bumco", "description": "yo mama", "reqId": "1234", "url": "https://bumco.example/jobs/1234"}"""))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.jobId").isString())
                 .andExpect(jsonPath("$.title").value("swe"))
                 .andExpect(jsonPath("$.company").value("bumco"))
                 .andExpect(jsonPath("$.description").value("yo mama"))
-                .andExpect(jsonPath("$.reqId").value("1234"));
+                .andExpect(jsonPath("$.reqId").value("1234"))
+                .andExpect(jsonPath("$.url").value("https://bumco.example/jobs/1234"));
+    }
+
+    @Test
+    public void testCreateJobMissingUrl() throws Exception {
+        mockMvc.perform(post("/api/jobs")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"title": "swe", "company": "bumco", "description": "yo mama", "reqId": "1234"}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("url is required"));
+    }
+
+    // no scheme, so URI parses it and toURL rejects it as not absolute
+    @Test
+    public void testCreateJobMalformedUrl() throws Exception {
+        mockMvc.perform(post("/api/jobs")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"title": "swe", "company": "bumco", "description": "yo mama", "reqId": "1234", "url": "bumco.example/jobs"}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").isString());
     }
 
     @Test
@@ -59,7 +81,7 @@ public class JobControllerTest {
         mockMvc.perform(post("/api/jobs")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"title": "swe", "company": "bumco", "description": "yo mama", "reqId": "1234"}"""))
+                                {"title": "swe", "company": "bumco", "description": "yo mama", "reqId": "1234", "url": "https://bumco.example/jobs/1234"}"""))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Job already exists"));
     }
