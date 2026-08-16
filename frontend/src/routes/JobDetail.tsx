@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   getJob,
+  listApplicants,
   listApplications,
   listStages,
   moveToNextStage,
@@ -10,9 +11,16 @@ import {
   updateStages,
   withdrawFromJob,
 } from '../api/client'
-import type { Pipeline, Stage } from '../api/types'
+import type { Applicant, Pipeline, Stage } from '../api/types'
 import { useLoad } from '../api/useLoad'
-import { currentStageLabel, labelStages, stageName } from '../pipeline/stages'
+import {
+  currentStageLabel,
+  labelStages,
+  stageKey,
+  stageName,
+  tallyStages,
+  UNKNOWN_STAGE,
+} from '../pipeline/stages'
 import { useSession } from '../session/SessionContext'
 
 // your pipeline on one job. keyed by job id, so this opens straight from a link in a new tab
@@ -23,14 +31,15 @@ export function JobDetail() {
   const userId = user!.userId
 
   const load = useCallback(async () => {
-    const [job, allStages, applications] = await Promise.all([
+    const [job, allStages, applications, applicants] = await Promise.all([
       getJob(jobId),
       listStages(),
       listApplications(userId),
+      listApplicants(jobId),
     ])
     // there is no endpoint for a single application, so your pipeline comes out of your list
     const mine = applications.find((application) => application.job.jobId === jobId)
-    return { job, allStages, pipeline: mine?.pipeline ?? null }
+    return { job, allStages, applicants, pipeline: mine?.pipeline ?? null }
   }, [jobId, userId])
 
   const { data, error, loading, reload } = useLoad(load)
@@ -193,6 +202,17 @@ export function JobDetail() {
               </div>
             </>
           )}
+
+          <div className="card">
+            <div className="section-header">
+              <h3>Where everyone is</h3>
+              {/* nothing pushes another tab's move to this one, so the way to see it is to ask */}
+              <button type="button" className="secondary" disabled={loading} onClick={reload}>
+                {loading ? 'Refreshing...' : 'Refresh'}
+              </button>
+            </div>
+            <Applicants applicants={data.applicants} allStages={data.allStages} youId={userId} />
+          </div>
         </>
       )}
     </section>
@@ -202,6 +222,58 @@ export function JobDetail() {
 // moveToNextStage asks for position + 1, which the backend rejects past the end of the list
 function atLastStage(pipeline: Pipeline): boolean {
   return pipeline.currentStagePosition >= pipeline.stages.length - 1
+}
+
+interface ApplicantsProps {
+  applicants: Applicant[]
+  allStages: Stage[]
+  youId: string
+}
+
+// everyone on this job and the round each of them is at, plus a head count per round. the tally
+// groups on (stage, occurrence) and the rows read their label back out of it, so a row and the
+// count it belongs to always say the same words - someone with one technical round and someone
+// with two are both at their first, however their own pipelines happen to label it
+function Applicants({ applicants, allStages, youId }: ApplicantsProps) {
+  if (applicants.length === 0) {
+    return <p>No one has recorded an application to this job yet.</p>
+  }
+
+  const tallies = tallyStages(
+    applicants.map((applicant) => applicant.pipeline),
+    allStages,
+  )
+  const labels = new Map(tallies.map((tally) => [tally.key, tally.label]))
+
+  return (
+    <>
+      <ul className="tally">
+        {tallies.map((tally) => (
+          <li key={tally.key}>
+            <span>{tally.label}</span>
+            <span className="count">{tally.count}</span>
+          </li>
+        ))}
+      </ul>
+
+      <ul className="applicants">
+        {applicants.map(({ user, pipeline }) => (
+          <li key={user.userId}>
+            <span className="applicant">
+              {user.firstName} {user.lastName}
+              {user.userId === youId && <span className="badge">you</span>}
+            </span>
+            <span className="stage">{labels.get(stageKey(pipeline)) ?? UNKNOWN_STAGE}</span>
+            {/* two people at the same round can be walking different pipelines, so say how long
+                each one's is rather than let the shared label imply they match */}
+            <span className="hint">
+              {pipeline.currentStagePosition + 1} of {pipeline.stages.length}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </>
+  )
 }
 
 interface StageListProps {

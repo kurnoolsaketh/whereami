@@ -30,3 +30,10 @@ export interface Application {
   job: Job
   pipeline: Pipeline
 }
+
+// one user who applied to a job, and where they are in it. the requesting user is in this list
+// too - there is no auth to exclude them by, so the UI marks which row is theirs
+export interface Applicant {
+  user: User
+  pipeline: Pipeline
+}
