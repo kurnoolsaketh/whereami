@@ -66,6 +66,12 @@ export function BrowseJobs() {
             <p className="subtitle">
               {job.company} <code>{job.reqId}</code>
             </p>
+            {/* a plain anchor, not a react-router Link - the posting is on someone else's site */}
+            <p className="subtitle">
+              <a href={job.url} target="_blank" rel="noreferrer">
+                View the posting
+              </a>
+            </p>
             {job.description !== '' && <p>{job.description}</p>}
             {applied ? (
               <p className="applied">Applied</p>

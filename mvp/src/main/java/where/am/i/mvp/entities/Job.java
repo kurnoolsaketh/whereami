@@ -1,5 +1,6 @@
 package where.am.i.mvp.entities;
 
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -11,14 +12,16 @@ public class Job {
     String description;
     String reqId;
     String jobId;
+    URL url;
 
-    public Job(String title, String company, String description, String reqId) throws NoSuchAlgorithmException {
+    public Job(String title, String company, String description, String reqId, URL url) throws NoSuchAlgorithmException {
         this.title = title;
         this.company = company;
         this.description = description;
         this.reqId = reqId;
         MessageDigest hash = MessageDigest.getInstance("SHA-256");
         this.jobId = bytesToHex(hash.digest((title + company + description + reqId).getBytes(StandardCharsets.UTF_8)));
+        this.url = url;
     }
 
     private static String bytesToHex(byte[] hash) {
@@ -47,6 +50,9 @@ public class Job {
     }
     public String getReqId() {
         return reqId;
+    }
+    public URL getUrl() {
+        return url;
     }
 
     //TODO: equals is overridden without hashCode, but Job is used as a HashMap key and inside

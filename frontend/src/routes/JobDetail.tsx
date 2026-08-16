@@ -110,6 +110,12 @@ export function JobDetail() {
           <p className="subtitle">
             {data.job.company} <code>{data.job.reqId}</code>
           </p>
+          {/* a plain anchor, not a react-router Link - the posting is on someone else's site */}
+          <p className="subtitle">
+            <a href={data.job.url} target="_blank" rel="noreferrer">
+              View the posting
+            </a>
+          </p>
           {data.job.description !== '' && <p>{data.job.description}</p>}
 
           {data.pipeline === null ? (

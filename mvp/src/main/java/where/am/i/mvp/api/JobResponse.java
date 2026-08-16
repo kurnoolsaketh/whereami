@@ -4,14 +4,18 @@ import where.am.i.mvp.entities.Job;
 
 import java.util.Comparator;
 
-public record JobResponse(String jobId, String title, String company, String description, String reqId) {
+public record JobResponse(String jobId, String title, String company, String description, String reqId, String url) {
 
     // the registries iterate HashMaps keyed by entities without hashCode, so order varies per
     // run - every list the api returns is sorted here instead
     public static final Comparator<JobResponse> BY_COMPANY_THEN_TITLE =
             Comparator.comparing(JobResponse::company).thenComparing(JobResponse::title);
 
+    // a URL serializes to an object of its parts, so it goes over the wire as a string. the null
+    // check is defence in depth - JobController.parseUrl rejects a missing url before a Job is
+    // built - but this mapper runs over the whole list, so one bad Job would 500 every listJobs
     public static JobResponse from(Job job) {
-        return new JobResponse(job.getId(), job.getTitle(), job.getCompany(), job.getDescription(), job.getReqId());
+        return new JobResponse(job.getId(), job.getTitle(), job.getCompany(), job.getDescription(),
+                job.getReqId(), job.getUrl() == null ? null : job.getUrl().toString());
     }
 }

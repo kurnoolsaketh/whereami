@@ -45,7 +45,7 @@ public class PipelineControllerTest {
         String response = mockMvc.perform(post("/api/jobs")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"title": "%s", "company": "%s", "description": "yo mama", "reqId": "1234"}"""
+                                {"title": "%s", "company": "%s", "description": "yo mama", "reqId": "1234", "url": "https://bumco.example/jobs/1234"}"""
                                 .formatted(title, company)))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
