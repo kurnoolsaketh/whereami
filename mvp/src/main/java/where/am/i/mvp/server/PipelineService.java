@@ -8,10 +8,10 @@ import java.io.IOException;
 import java.util.*;
 import java.util.stream.Collectors;
 
-public class PipelineController {
+public class PipelineService {
     HashMap<Job, Set<User>> jobToApplicants;
 
-    public PipelineController() {
+    public PipelineService() {
         this.jobToApplicants = new HashMap<>();
     }
 

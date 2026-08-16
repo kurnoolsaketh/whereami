@@ -3,7 +3,6 @@ package where.am.i.mvp.server;
 import where.am.i.mvp.entities.Job;
 
 import java.io.IOException;
-import java.nio.channels.Pipe;
 import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
 
@@ -11,7 +10,7 @@ import java.util.HashMap;
 public class JobRegistry {
     HashMap<String, Job> jobIdToJob;
 
-    public JobRegistry(PipelineController pipelineController) {
+    public JobRegistry(PipelineService pipelineService) {
         this.jobIdToJob = new HashMap<>();
     }
 

@@ -3,7 +3,7 @@ package where.am.i.mvp;
 import where.am.i.mvp.entities.Pipeline;
 import where.am.i.mvp.entities.User;
 import where.am.i.mvp.entities.Job;
-import where.am.i.mvp.server.PipelineController;
+import where.am.i.mvp.server.PipelineService;
 import where.am.i.mvp.server.UserRegistry;
 import where.am.i.mvp.server.JobRegistry;
 
@@ -16,41 +16,41 @@ import java.util.Set;
 public class Client {
     JobRegistry jobRegistry;
     UserRegistry userRegistry;
-    PipelineController pipelineController;
+    PipelineService pipelineService;
 
-    public Client(JobRegistry jobRegistry, UserRegistry userRegistry, PipelineController pipelineController) {
+    public Client(JobRegistry jobRegistry, UserRegistry userRegistry, PipelineService pipelineService) {
         this.jobRegistry = jobRegistry;
         this.userRegistry = userRegistry;
-        this.pipelineController = pipelineController;
+        this.pipelineService = pipelineService;
     }
 
     // Pipeline
     public void addApplicant(User user, Job job) {
-        pipelineController.addApplicant(user, job);
+        pipelineService.addApplicant(user, job);
     }
 
     public void removeApplicant(User user, Job job) throws IOException {
-        pipelineController.removeApplicant(user, job);
+        pipelineService.removeApplicant(user, job);
     }
 
     public void updateStages(User user, Job job, List<Pipeline.Stage> stages) throws IOException {
-        pipelineController.updateStages(user, job, stages);
+        pipelineService.updateStages(user, job, stages);
     }
 
     public void moveToNextStage(User user, Job job) throws IOException {
-        pipelineController.moveToNextStage(user, job);
+        pipelineService.moveToNextStage(user, job);
     }
 
     public void moveToStage(User user, Job job, int newPos) throws IOException {
-        pipelineController.moveToStage(user, job, newPos);
+        pipelineService.moveToStage(user, job, newPos);
     }
 
     public Set<User> getApplicants(Job job) {
-        return pipelineController.getApplicants(job);
+        return pipelineService.getApplicants(job);
     }
 
     public Set<User> getApplicantsAtStage(Job job, Pipeline.Stage stage) {
-        return pipelineController.getApplicantsAtStage(job, stage);
+        return pipelineService.getApplicantsAtStage(job, stage);
     }
 
     // Job accessors

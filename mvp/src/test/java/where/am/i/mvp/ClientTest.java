@@ -7,7 +7,7 @@ import where.am.i.mvp.entities.Job;
 import where.am.i.mvp.entities.Pipeline;
 import where.am.i.mvp.entities.User;
 import where.am.i.mvp.server.JobRegistry;
-import where.am.i.mvp.server.PipelineController;
+import where.am.i.mvp.server.PipelineService;
 import where.am.i.mvp.server.UserRegistry;
 
 import java.io.IOException;
@@ -18,15 +18,15 @@ import java.util.Set;
 public class ClientTest {
     JobRegistry jobRegistry;
     UserRegistry userRegistry;
-    PipelineController pipelineController;
+    PipelineService pipelineService;
     Client client;
 
     @BeforeEach
     public void setup() {
-        pipelineController = new PipelineController();
-        jobRegistry = new JobRegistry(pipelineController);
+        pipelineService = new PipelineService();
+        jobRegistry = new JobRegistry(pipelineService);
         userRegistry = new UserRegistry();
-        client = new Client(jobRegistry, userRegistry, pipelineController);
+        client = new Client(jobRegistry, userRegistry, pipelineService);
     }
 
     @Test
