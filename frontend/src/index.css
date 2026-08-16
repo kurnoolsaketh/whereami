@@ -33,6 +33,11 @@ h2 {
   margin: 0 0 0.75rem;
 }
 
+h3 {
+  font-size: 1rem;
+  margin: 0;
+}
+
 code {
   font-size: 0.85em;
   color: var(--muted);
@@ -47,6 +52,24 @@ code {
   padding: 1rem 1.5rem;
   background-color: var(--surface);
   border-bottom: 1px solid var(--border);
+}
+
+.app-header nav {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.9rem;
+}
+
+.app-header nav a {
+  color: var(--muted);
+  text-decoration: none;
+  padding-bottom: 2px;
+  border-bottom: 2px solid transparent;
+}
+
+.app-header nav a.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
 }
 
 .app-header .who {
@@ -82,7 +105,39 @@ main {
 
 .card p {
   color: var(--muted);
-  margin: 0;
+  margin: 0.5rem 0 0;
+}
+
+.section-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.subtitle {
+  font-size: 0.9rem;
+}
+
+/* where you stand, which is the one thing every application row is read for. two classes, so
+   this beats the muted `.card p` above without !important */
+.card .stage {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.card .applied {
+  color: var(--accent);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+a {
+  color: var(--accent);
+}
+
+.button-link {
+  font-size: 0.9rem;
 }
 
 form {
@@ -99,16 +154,19 @@ label {
   color: var(--muted);
 }
 
-input {
+input,
+textarea {
   font: inherit;
   padding: 0.5rem;
   border: 1px solid var(--border);
   border-radius: 6px;
   background-color: var(--surface);
   color: var(--text);
+  resize: vertical;
 }
 
-input:focus-visible {
+input:focus-visible,
+textarea:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }

@@ -1,4 +1,4 @@
-import type { User } from './types'
+import type { Application, Job, User } from './types'
 
 // every call to the backend goes through this module, so no component talks to the network
 // directly. the vite dev server proxies /api to the spring boot app on port 8080
@@ -61,4 +61,25 @@ export function getUser(userId: string): Promise<User> {
 
 export function createUser(firstName: string, lastName: string, userId: string): Promise<User> {
   return request('/users', 'POST', { firstName, lastName, userId })
+}
+
+export function listJobs(): Promise<Job[]> {
+  return request('/jobs', 'GET')
+}
+
+export function createJob(
+  title: string,
+  company: string,
+  description: string,
+  reqId: string,
+): Promise<Job> {
+  return request('/jobs', 'POST', { title, company, description, reqId })
+}
+
+export function listApplications(userId: string): Promise<Application[]> {
+  return request(`/users/${encodeURIComponent(userId)}/applications`, 'GET')
+}
+
+export function applyToJob(userId: string, jobId: string): Promise<Application> {
+  return request(`/users/${encodeURIComponent(userId)}/applications`, 'POST', { jobId })
 }
