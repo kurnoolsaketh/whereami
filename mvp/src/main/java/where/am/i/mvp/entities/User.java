@@ -5,6 +5,7 @@ import java.nio.channels.Pipe;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 public class User {
     String firstName;
@@ -27,6 +28,10 @@ public class User {
         activeJobToPipeline.remove(job);
     }
 
+    public Set<Job> getActiveJobs() {
+        return Set.copyOf(activeJobToPipeline.keySet());
+    }
+
     public Pipeline getPipeline(Job job) throws IOException {
         if (!activeJobToPipeline.containsKey(job)) {
             throw new IOException("User has not applied to the [%s] role at [%s] or has been removed".formatted(job.title, job.company));
@@ -44,6 +49,11 @@ public class User {
         return userId;
     }
 
+    //TODO: equals is overridden without hashCode, but User is used inside the HashSets
+    // PipelineService keeps per job. Two equal Users land in different buckets. This only works
+    // today because UserRegistry hands out one instance per user.
+    //TODO: equality depends on the mutable activeJobToPipeline, so a user stops being equal to
+    // themselves as recorded a moment ago every time they apply to or withdraw from a job.
     @Override
     public boolean equals(Object o) {
         if (!(o instanceof User other)) {

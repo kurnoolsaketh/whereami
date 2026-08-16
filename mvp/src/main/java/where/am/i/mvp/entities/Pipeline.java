@@ -13,6 +13,9 @@ public class Pipeline {
         stages.add(Stage.APPLIED);
     }
 
+    //TODO: every validation failure in mvp - here, in Pipeline.moveToStage, in User.getPipeline
+    // and in both registries - is signalled with IOException, which is not an I/O condition.
+    // Callers cannot tell a bad argument from a real read/write failure.
     public void updateStages(List<Stage> stages, int newPos) throws IOException {
         if (stages.isEmpty()) {
             throw new IOException("Invalid stages - length must be greater than 0");
@@ -38,6 +41,10 @@ public class Pipeline {
             throw new IOException("Invalid position [%d] - max [%d]".formatted(newPos, stages.size()-1));
         }
         this.position = newPos;
+    }
+
+    public List<Stage> getStages() {
+        return List.copyOf(stages);
     }
 
     public Stage getCurrentStage() {

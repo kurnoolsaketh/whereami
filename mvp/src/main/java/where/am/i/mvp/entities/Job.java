@@ -49,6 +49,9 @@ public class Job {
         return reqId;
     }
 
+    //TODO: equals is overridden without hashCode, but Job is used as a HashMap key and inside
+    // HashSets. Two equal Jobs land in different buckets. This only works today because
+    // JobRegistry hands out one instance per job.
     @Override
     public boolean equals(Object o) {
         if (!(o instanceof Job other)) {

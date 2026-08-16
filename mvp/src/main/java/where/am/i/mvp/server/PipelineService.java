@@ -21,6 +21,8 @@ public class PipelineService {
         jobToApplicants.get(job).add(user);
     }
 
+    //TODO: throws NullPointerException when the job has no applicants entry yet - get returns
+    // null and is dereferenced without a check.
     public void removeApplicant(User user, Job job) throws IOException {
         user.removeJob(job);
         jobToApplicants.get(job).remove(user);
@@ -39,6 +41,8 @@ public class PipelineService {
             try {
                 return user.getPipeline(job).getCurrentStage() == stage;
             } catch (IOException e) {
+                //TODO: wrapping in RuntimeException turns a validation failure into an
+                // unhandled crash. Callers cannot tell it apart from a real defect.
                 throw new RuntimeException(e);
             }
         }).collect(Collectors.toSet());
