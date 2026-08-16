@@ -1,6 +1,7 @@
 # Applicant Tracking System for Applicants (exact name TBD)
 
-This project allows job applicants to see statistics on who else has applied to jobs that they have and where they are in the pipeline. It is currently in MVP stage.
+This project allows job applicants to see statistics on who else has applied to jobs that they have and where they are in the pipeline. The end users are job applicants (not recruiters/employers). The larger goal of this app is to recreate employers' applicant tracking systems via crowdsourcing.
+It is currently in MVP stage.
 
 ## MVP Implementation
 ### Structure
@@ -13,7 +14,7 @@ MVP can be found under `whereami/mvp`. Its package structure is as follows:
   - `Pipeline`: a wrapper around the interview stages that a `User` goes through (as specified by the hiring team/recruiter) plus the `User`'s current interview stage. There is one `Pipeline` instance per `Job` per `User`. In other words, different `User`s may have different `Pipeline`s for the same `Job` to reflect how the interview process may be different for each candidate.
 - `where.am.i.mvp.server`: Sub-package that contains a primitive backend server implementation:
   - `JobRegistry`: manages job lifecycle on the backend (create and get)
-  - `PipelineController`: manages pipeline lifecycle on the backend
+  - `PipelineService`: manages pipeline lifecycle on the backend
   - `UserRegistry`: manages user lifecycle on the backend
 
 Tests can be found under `mvp/test`.

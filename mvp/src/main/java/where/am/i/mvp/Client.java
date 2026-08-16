@@ -33,8 +33,8 @@ public class Client {
         pipelineService.removeApplicant(user, job);
     }
 
-    public void updateStages(User user, Job job, List<Pipeline.Stage> stages) throws IOException {
-        pipelineService.updateStages(user, job, stages);
+    public void updateStages(User user, Job job, List<Pipeline.Stage> stages, int newPos) throws IOException {
+        pipelineService.updateStages(user, job, stages, newPos);
     }
 
     public void moveToNextStage(User user, Job job) throws IOException {

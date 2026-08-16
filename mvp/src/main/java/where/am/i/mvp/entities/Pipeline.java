@@ -13,14 +13,21 @@ public class Pipeline {
         stages.add(Stage.APPLIED);
     }
 
-    public void updateStages(List<Stage> stages) throws IOException {
+    public void updateStages(List<Stage> stages, int newPos) throws IOException {
         if (stages.isEmpty()) {
             throw new IOException("Invalid stages - length must be greater than 0");
         }
         if (stages.getFirst() != Stage.APPLIED) {
             throw new IOException("First stage must be [%s]. Actual: [%s]".formatted(Stage.APPLIED, stages.getFirst()));
         }
+        if (newPos < 0) {
+            throw new IOException("Invalid position [%d] - must be greater than or equal to 0".formatted(newPos));
+        }
+        if (newPos >= stages.size()) {
+            throw new IOException("Invalid position [%d] - max [%d]".formatted(newPos, stages.size()-1));
+        }
         this.stages = new ArrayList<>(stages);
+        this.position = newPos;
     }
 
     public void moveToStage(int newPos) throws IOException {
@@ -30,7 +37,7 @@ public class Pipeline {
         if (newPos >= stages.size()) {
             throw new IOException("Invalid position [%d] - max [%d]".formatted(newPos, stages.size()-1));
         }
-        position = newPos;
+        this.position = newPos;
     }
 
     public Stage getCurrentStage() {

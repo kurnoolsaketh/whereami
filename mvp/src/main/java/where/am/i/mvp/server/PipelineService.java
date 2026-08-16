@@ -44,8 +44,8 @@ public class PipelineService {
         }).collect(Collectors.toSet());
     }
 
-    public void updateStages(User user, Job job, List<Pipeline.Stage> stages) throws IOException {
-        user.getPipeline(job).updateStages(stages);
+    public void updateStages(User user, Job job, List<Pipeline.Stage> stages, int newPos) throws IOException {
+        user.getPipeline(job).updateStages(stages, newPos);
     }
 
     public void moveToNextStage(User user, Job job) throws IOException {

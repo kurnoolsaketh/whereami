@@ -96,7 +96,7 @@ public class ClientTest {
         String id = client.createJob("swe at ass inc", "bumco", "yo mama", "1234");
         Job job = client.getJob(id);
         client.addApplicant(user, job);
-        client.updateStages(user, job, List.of(Pipeline.Stage.APPLIED, Pipeline.Stage.RECRUITER_SCREEN, Pipeline.Stage.HIRING_MANAGER_SCREEN, Pipeline.Stage.TECHNICAL_ROUND, Pipeline.Stage.BEHAVIORAL_ROUND, Pipeline.Stage.ONSITE, Pipeline.Stage.OFFER));
+        client.updateStages(user, job, List.of(Pipeline.Stage.APPLIED, Pipeline.Stage.RECRUITER_SCREEN, Pipeline.Stage.HIRING_MANAGER_SCREEN, Pipeline.Stage.TECHNICAL_ROUND, Pipeline.Stage.BEHAVIORAL_ROUND, Pipeline.Stage.ONSITE, Pipeline.Stage.OFFER), 0);
 
         client.moveToNextStage(user, job);
         Assertions.assertEquals(Pipeline.Stage.RECRUITER_SCREEN, user.getPipeline(job).getCurrentStage());
@@ -119,7 +119,7 @@ public class ClientTest {
         Job job = client.getJob(id);
         client.addApplicant(user, job);
         var stages = List.of(Pipeline.Stage.APPLIED, Pipeline.Stage.RECRUITER_SCREEN, Pipeline.Stage.HIRING_MANAGER_SCREEN, Pipeline.Stage.TECHNICAL_ROUND, Pipeline.Stage.BEHAVIORAL_ROUND, Pipeline.Stage.ONSITE, Pipeline.Stage.OFFER);
-        client.updateStages(user, job, stages);
+        client.updateStages(user, job, stages, 0);
 
         client.moveToStage(user, job, stages.indexOf(Pipeline.Stage.OFFER));
         Assertions.assertEquals(Pipeline.Stage.OFFER, user.getPipeline(job).getCurrentStage());
@@ -132,7 +132,7 @@ public class ClientTest {
         Job job = client.getJob(id);
         client.addApplicant(user, job);
         var stages = List.of(Pipeline.Stage.APPLIED, Pipeline.Stage.TECHNICAL_ROUND, Pipeline.Stage.TECHNICAL_ROUND, Pipeline.Stage.ONSITE, Pipeline.Stage.ONSITE, Pipeline.Stage.OFFER);
-        client.updateStages(user, job, stages);
+        client.updateStages(user, job, stages, 0);
 
         client.moveToStage(user, job, 1);
         Assertions.assertEquals(Pipeline.Stage.TECHNICAL_ROUND, user.getPipeline(job).getCurrentStage());
@@ -151,7 +151,7 @@ public class ClientTest {
         Job job = client.getJob(id);
         client.addApplicant(user, job);
         var stages = List.of(Pipeline.Stage.APPLIED);
-        client.updateStages(user, job, stages);
+        client.updateStages(user, job, stages, 0);
 
         Assertions.assertThrows(IOException.class, () -> client.moveToNextStage(user, job));
     }
@@ -170,8 +170,8 @@ public class ClientTest {
         Assertions.assertTrue(client.getApplicants(job).contains(user2));
 
         var stages = List.of(Pipeline.Stage.APPLIED, Pipeline.Stage.TECHNICAL_ROUND, Pipeline.Stage.OFFER);
-        client.updateStages(user1, job, stages);
-        client.updateStages(user2, job, stages);
+        client.updateStages(user1, job, stages, 0);
+        client.updateStages(user2, job, stages, 0);
 
         client.moveToNextStage(user1, job);
         Assertions.assertEquals(Pipeline.Stage.TECHNICAL_ROUND, user1.getPipeline(job).getCurrentStage());
@@ -206,9 +206,9 @@ public class ClientTest {
         Assertions.assertTrue(client.getApplicants(job).contains(user2));
 
         var stages1 = List.of(Pipeline.Stage.APPLIED, Pipeline.Stage.TECHNICAL_ROUND, Pipeline.Stage.OFFER);
-        client.updateStages(user1, job, stages1);
+        client.updateStages(user1, job, stages1, 0);
         var stages2 = List.of(Pipeline.Stage.APPLIED, Pipeline.Stage.TECHNICAL_ROUND, Pipeline.Stage.BEHAVIORAL_ROUND, Pipeline.Stage.OFFER);
-        client.updateStages(user2, job, stages2);
+        client.updateStages(user2, job, stages2, 0);
 
         client.moveToNextStage(user1, job);
         Assertions.assertEquals(Pipeline.Stage.TECHNICAL_ROUND, user1.getPipeline(job).getCurrentStage());
