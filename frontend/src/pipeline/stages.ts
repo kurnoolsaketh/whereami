@@ -26,7 +26,7 @@ export function labelStages(stages: Stage[]): LabelledStage[] {
   return stages.map((stage) => {
     const occurrence = (soFar.get(stage) ?? 0) + 1
     soFar.set(stage, occurrence)
-    const name = displayName(stage)
+    const name = stageName(stage)
     return { stage, occurrence, label: totals.get(stage) === 1 ? name : `${name} ${occurrence}` }
   })
 }
@@ -41,8 +41,9 @@ export function currentStageLabel(pipeline: Pipeline): string {
   return currentStage(pipeline)?.label ?? UNKNOWN_STAGE
 }
 
-// TECHNICAL_ROUND -> Technical Round
-function displayName(stage: Stage): string {
+// TECHNICAL_ROUND -> Technical Round. the stage picker names stages one at a time, with no list
+// to count occurrences against, so it wants this rather than a label
+export function stageName(stage: Stage): string {
   return stage
     .split('_')
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())

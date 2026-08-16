@@ -193,6 +193,98 @@ button:disabled {
   color: var(--text);
 }
 
+/* the pipeline on the job detail route, and the form that edits it */
+.pipeline,
+.stage-editor {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.pipeline li,
+.stage-editor li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* a stage you can jump to is one row of a list being read, not a call to action - as primary
+   buttons the whole pipeline would come out a column of solid blue */
+.pipeline button,
+.stage-editor .remove {
+  align-self: auto;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.9rem;
+  background-color: transparent;
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.stage-editor .remove {
+  color: var(--muted);
+}
+
+.pipeline .current button {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* the stage you are on is disabled because there is nowhere to jump to, not because something
+   is in flight, so it should not look busy */
+.pipeline .current button:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+.stage-editor select {
+  font: inherit;
+  padding: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background-color: var(--surface);
+  color: var(--text);
+}
+
+/* labels stack their input above the text everywhere else, but a radio belongs beside it */
+.stage-editor label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.actions button {
+  align-self: auto;
+}
+
+.secondary {
+  background-color: transparent;
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.danger {
+  background-color: transparent;
+  border-color: var(--error-text);
+  color: var(--error-text);
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
 .notice {
   padding: 1.5rem;
   color: var(--muted);

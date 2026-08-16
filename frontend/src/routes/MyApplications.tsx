@@ -28,7 +28,9 @@ export function MyApplications() {
 
       {applications?.map(({ job, pipeline }) => (
         <article className="card" key={job.jobId}>
-          <h3>{job.title}</h3>
+          <h3>
+            <Link to={`/jobs/${job.jobId}`}>{job.title}</Link>
+          </h3>
           <p className="subtitle">
             {job.company} <code>{job.reqId}</code>
           </p>

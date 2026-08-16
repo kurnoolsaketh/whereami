@@ -1,4 +1,4 @@
-import type { Application, Job, User } from './types'
+import type { Application, Job, Stage, User } from './types'
 
 // every call to the backend goes through this module, so no component talks to the network
 // directly. the vite dev server proxies /api to the spring boot app on port 8080
@@ -63,8 +63,17 @@ export function createUser(firstName: string, lastName: string, userId: string):
   return request('/users', 'POST', { firstName, lastName, userId })
 }
 
+// the stages a pipeline can be built from, so the stage picker never hardcodes the enum
+export function listStages(): Promise<Stage[]> {
+  return request('/stages', 'GET')
+}
+
 export function listJobs(): Promise<Job[]> {
   return request('/jobs', 'GET')
+}
+
+export function getJob(jobId: string): Promise<Job> {
+  return request(`/jobs/${encodeURIComponent(jobId)}`, 'GET')
 }
 
 export function createJob(
@@ -82,4 +91,35 @@ export function listApplications(userId: string): Promise<Application[]> {
 
 export function applyToJob(userId: string, jobId: string): Promise<Application> {
   return request(`/users/${encodeURIComponent(userId)}/applications`, 'POST', { jobId })
+}
+
+export function withdrawFromJob(userId: string, jobId: string): Promise<void> {
+  return request(applicationPath(userId, jobId), 'DELETE')
+}
+
+// the list and the position go together: updateStages validates the position against the
+// incoming list, so a rejected save changes neither of them
+export function updateStages(
+  userId: string,
+  jobId: string,
+  stages: Stage[],
+  currentStagePosition: number,
+): Promise<Application> {
+  return request(`${applicationPath(userId, jobId)}/stages`, 'PUT', { stages, currentStagePosition })
+}
+
+export function moveToStage(
+  userId: string,
+  jobId: string,
+  currentStagePosition: number,
+): Promise<Application> {
+  return request(`${applicationPath(userId, jobId)}/position`, 'PUT', { currentStagePosition })
+}
+
+export function moveToNextStage(userId: string, jobId: string): Promise<Application> {
+  return request(`${applicationPath(userId, jobId)}/next`, 'POST')
+}
+
+function applicationPath(userId: string, jobId: string): string {
+  return `/users/${encodeURIComponent(userId)}/applications/${encodeURIComponent(jobId)}`
 }
