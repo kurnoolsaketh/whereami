@@ -1,4 +1,4 @@
-package where.am.i.mvp.api;
+package where.am.i.mvp.api.controller;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;

@@ -28,7 +28,7 @@ public class JobControllerTest {
     ObjectMapper objectMapper;
 
     private String createJob(String title, String company) throws Exception {
-        String response = mockMvc.perform(post("/api/jobs")
+        String response = mockMvc.perform(post("/api/jobs/new")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"title": "%s", "company": "%s", "description": "yo mama", "reqId": "1234", "url": "https://bumco.example/jobs/1234"}"""
@@ -40,7 +40,7 @@ public class JobControllerTest {
 
     @Test
     public void testCreateJob() throws Exception {
-        mockMvc.perform(post("/api/jobs")
+        mockMvc.perform(post("/api/jobs/new")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"title": "swe", "company": "bumco", "description": "yo mama", "reqId": "1234", "url": "https://bumco.example/jobs/1234"}"""))
@@ -55,7 +55,7 @@ public class JobControllerTest {
 
     @Test
     public void testCreateJobMissingUrl() throws Exception {
-        mockMvc.perform(post("/api/jobs")
+        mockMvc.perform(post("/api/jobs/new")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"title": "swe", "company": "bumco", "description": "yo mama", "reqId": "1234"}"""))
@@ -66,7 +66,7 @@ public class JobControllerTest {
     // no scheme, so URI parses it and toURL rejects it as not absolute
     @Test
     public void testCreateJobMalformedUrl() throws Exception {
-        mockMvc.perform(post("/api/jobs")
+        mockMvc.perform(post("/api/jobs/new")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"title": "swe", "company": "bumco", "description": "yo mama", "reqId": "1234", "url": "bumco.example/jobs"}"""))
@@ -78,7 +78,7 @@ public class JobControllerTest {
     public void testCreateJobAlreadyExists() throws Exception {
         createJob("swe", "bumco");
 
-        mockMvc.perform(post("/api/jobs")
+        mockMvc.perform(post("/api/jobs/new")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"title": "swe", "company": "bumco", "description": "yo mama", "reqId": "1234", "url": "https://bumco.example/jobs/1234"}"""))

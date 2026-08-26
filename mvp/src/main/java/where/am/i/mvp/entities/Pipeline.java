@@ -7,10 +7,12 @@ import java.util.*;
 public class Pipeline {
     List<Stage> stages;
     int position = 0;
+    final Level level;
 
-    public Pipeline() {
+    public Pipeline(Level level) {
         this.stages = new ArrayList<>();
         stages.add(Stage.APPLIED);
+        this.level = level;
     }
 
     //TODO: every validation failure in mvp - here, in Pipeline.moveToStage, in User.getPipeline
@@ -53,6 +55,10 @@ public class Pipeline {
 
     public int getCurrentStagePosition() {
         return position;
+    }
+
+    public Level getLevel() {
+        return level;
     }
 
     public enum Stage {

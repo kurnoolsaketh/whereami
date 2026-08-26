@@ -2,8 +2,9 @@ package where.am.i.mvp.api;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import where.am.i.mvp.server.CompanyRegistry;
 import where.am.i.mvp.server.JobRegistry;
-import where.am.i.mvp.server.PipelineService;
+import where.am.i.mvp.server.ApplicantService;
 import where.am.i.mvp.server.UserRegistry;
 
 // the registries hold everything in memory, so the whole app shares one of each
@@ -11,17 +12,22 @@ import where.am.i.mvp.server.UserRegistry;
 public class RegistryConfiguration {
 
     @Bean
-    public PipelineService pipelineService() {
-        return new PipelineService();
+    public ApplicantService pipelineService() {
+        return new ApplicantService();
     }
 
     @Bean
-    public JobRegistry jobRegistry(PipelineService pipelineService) {
-        return new JobRegistry(pipelineService);
+    public JobRegistry jobRegistry() {
+        return new JobRegistry();
     }
 
     @Bean
     public UserRegistry userRegistry() {
         return new UserRegistry();
+    }
+
+    @Bean
+    public CompanyRegistry companyRegistry() {
+        return new CompanyRegistry();
     }
 }
