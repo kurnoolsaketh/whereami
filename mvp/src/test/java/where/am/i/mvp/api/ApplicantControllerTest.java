@@ -21,7 +21,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
-public class PipelineControllerTest {
+public class ApplicantControllerTest {
+
+    private static final String SWE = "Software Engineer";
+    private static final String PM = "Product Manager";
 
     @Autowired
     MockMvc mockMvc;
@@ -38,55 +41,58 @@ public class PipelineControllerTest {
                         .content("""
                                 {"firstName": "yo", "lastName": "mama", "userId": "bruh2000"}"""))
                 .andExpect(status().isOk());
-        jobId = createJob("swe", "bumco");
+        jobId = createJob("swe", "bumco", SWE);
     }
 
-    private String createJob(String title, String company) throws Exception {
-        String response = mockMvc.perform(post("/api/jobs")
+    private String createJob(String title, String company, String role) throws Exception {
+        String response = mockMvc.perform(post("/api/jobs/%s/new".formatted(company))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"title": "%s", "company": "%s", "description": "yo mama", "reqId": "1234", "url": "https://bumco.example/jobs/1234"}"""
-                                .formatted(title, company)))
+                                {"title": "%s", "url": "https://%s.example/%s", "role": "%s"}"""
+                                .formatted(title, company, title, role)))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         return objectMapper.readTree(response).get("jobId").asString();
     }
 
+    // a level goes out and comes back as its display name, so "Senior", never "SENIOR"
     private void apply(String userId, String jobId) throws Exception {
-        mockMvc.perform(post("/api/users/%s/applications".formatted(userId))
+        mockMvc.perform(post("/api/users/%s/apply".formatted(userId))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"jobId": "%s"}""".formatted(jobId)))
+                                {"jobId": "%s", "level": "Senior"}""".formatted(jobId)))
                 .andExpect(status().isOk());
     }
 
     @Test
     public void testApplicationsIsEmptyBeforeApplying() throws Exception {
-        mockMvc.perform(get("/api/users/bruh2000/applications"))
+        mockMvc.perform(get("/api/users/bruh2000/applied"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isEmpty());
     }
 
     @Test
     public void testApplicationsForUnknownUser() throws Exception {
-        mockMvc.perform(get("/api/users/nobody/applications"))
+        mockMvc.perform(get("/api/users/nobody/applied"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("No user found with id nobody"));
     }
 
     @Test
     public void testApplyStartsAtApplied() throws Exception {
-        mockMvc.perform(post("/api/users/bruh2000/applications")
+        mockMvc.perform(post("/api/users/bruh2000/apply")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"jobId": "%s"}""".formatted(jobId)))
+                                {"jobId": "%s", "level": "Senior"}""".formatted(jobId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.job.jobId").value(jobId))
+                .andExpect(jsonPath("$.job.role").value("Software Engineer"))
                 .andExpect(jsonPath("$.pipeline.stages.length()").value(1))
                 .andExpect(jsonPath("$.pipeline.stages[0]").value("APPLIED"))
-                .andExpect(jsonPath("$.pipeline.currentStagePosition").value(0));
+                .andExpect(jsonPath("$.pipeline.currentStagePosition").value(0))
+                .andExpect(jsonPath("$.pipeline.level").value("Senior"));
 
-        mockMvc.perform(get("/api/users/bruh2000/applications"))
+        mockMvc.perform(get("/api/users/bruh2000/applied"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].job.jobId").value(jobId))
@@ -97,21 +103,21 @@ public class PipelineControllerTest {
 
     @Test
     public void testApplyToUnknownJob() throws Exception {
-        mockMvc.perform(post("/api/users/bruh2000/applications")
+        mockMvc.perform(post("/api/users/bruh2000/apply")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"jobId": "%s"}""".formatted("x".repeat(64))))
+                                {"jobId": "%s", "level": "Senior"}""".formatted("x".repeat(64))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Job [%s] does not exist".formatted("x".repeat(64))));
     }
 
     @Test
     public void testApplicationsSortByCompanyThenTitle() throws Exception {
-        apply("bruh2000", createJob("swe", "zebra"));
-        apply("bruh2000", createJob("tpm", "acme"));
-        apply("bruh2000", createJob("designer", "acme"));
+        apply("bruh2000", createJob("swe", "zebra", SWE));
+        apply("bruh2000", createJob("tpm", "acme", PM));
+        apply("bruh2000", createJob("designer", "acme", SWE));
 
-        mockMvc.perform(get("/api/users/bruh2000/applications"))
+        mockMvc.perform(get("/api/users/bruh2000/applied"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(3))
                 .andExpect(jsonPath("$[0].job.company").value("acme"))
@@ -126,10 +132,10 @@ public class PipelineControllerTest {
     public void testWithdraw() throws Exception {
         apply("bruh2000", jobId);
 
-        mockMvc.perform(delete("/api/users/bruh2000/applications/" + jobId))
+        mockMvc.perform(delete("/api/users/bruh2000/applied/" + jobId))
                 .andExpect(status().isNoContent());
 
-        mockMvc.perform(get("/api/users/bruh2000/applications"))
+        mockMvc.perform(get("/api/users/bruh2000/applied"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isEmpty());
     }
@@ -138,7 +144,7 @@ public class PipelineControllerTest {
     public void testUpdateStages() throws Exception {
         apply("bruh2000", jobId);
 
-        mockMvc.perform(put("/api/users/bruh2000/applications/%s/stages".formatted(jobId))
+        mockMvc.perform(put("/api/users/bruh2000/applied/%s/updateStages".formatted(jobId))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"stages": ["APPLIED", "TECHNICAL_ROUND", "TECHNICAL_ROUND", "OFFER"],
@@ -153,14 +159,14 @@ public class PipelineControllerTest {
     public void testUpdateStagesRejectsListNotStartingWithApplied() throws Exception {
         apply("bruh2000", jobId);
 
-        mockMvc.perform(put("/api/users/bruh2000/applications/%s/stages".formatted(jobId))
+        mockMvc.perform(put("/api/users/bruh2000/applied/%s/updateStages".formatted(jobId))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"stages": ["ONSITE", "OFFER"], "currentStagePosition": 0}"""))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("First stage must be [APPLIED]. Actual: [ONSITE]"));
 
-        mockMvc.perform(get("/api/users/bruh2000/applications"))
+        mockMvc.perform(get("/api/users/bruh2000/applied"))
                 .andExpect(jsonPath("$[0].pipeline.stages[0]").value("APPLIED"))
                 .andExpect(jsonPath("$[0].pipeline.stages.length()").value(1));
     }
@@ -169,7 +175,7 @@ public class PipelineControllerTest {
     public void testUpdateStagesRejectsPositionPastTheNewList() throws Exception {
         apply("bruh2000", jobId);
 
-        mockMvc.perform(put("/api/users/bruh2000/applications/%s/stages".formatted(jobId))
+        mockMvc.perform(put("/api/users/bruh2000/applied/%s/updateStages".formatted(jobId))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"stages": ["APPLIED", "OFFER"], "currentStagePosition": 5}"""))
@@ -182,7 +188,7 @@ public class PipelineControllerTest {
         apply("bruh2000", jobId);
         setStages("APPLIED", "TECHNICAL_ROUND", "OFFER");
 
-        mockMvc.perform(put("/api/users/bruh2000/applications/%s/position".formatted(jobId))
+        mockMvc.perform(put("/api/users/bruh2000/applied/%s/moveToStage".formatted(jobId))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"currentStagePosition": 2}"""))
@@ -196,7 +202,7 @@ public class PipelineControllerTest {
         apply("bruh2000", jobId);
         setStages("APPLIED", "TECHNICAL_ROUND", "OFFER");
 
-        mockMvc.perform(put("/api/users/bruh2000/applications/%s/position".formatted(jobId))
+        mockMvc.perform(put("/api/users/bruh2000/applied/%s/moveToStage".formatted(jobId))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"currentStagePosition": 3}"""))
@@ -209,11 +215,11 @@ public class PipelineControllerTest {
         apply("bruh2000", jobId);
         setStages("APPLIED", "TECHNICAL_ROUND", "OFFER");
 
-        mockMvc.perform(post("/api/users/bruh2000/applications/%s/next".formatted(jobId)))
+        mockMvc.perform(post("/api/users/bruh2000/applied/%s/moveToNextStage".formatted(jobId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.pipeline.currentStagePosition").value(1));
 
-        mockMvc.perform(post("/api/users/bruh2000/applications/%s/next".formatted(jobId)))
+        mockMvc.perform(post("/api/users/bruh2000/applied/%s/moveToNextStage".formatted(jobId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.pipeline.currentStagePosition").value(2));
     }
@@ -222,22 +228,35 @@ public class PipelineControllerTest {
     public void testMoveToNextStagePastTheLastOne() throws Exception {
         apply("bruh2000", jobId);
 
-        mockMvc.perform(post("/api/users/bruh2000/applications/%s/next".formatted(jobId)))
+        mockMvc.perform(post("/api/users/bruh2000/applied/%s/moveToNextStage".formatted(jobId)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Invalid position [1] - max [0]"));
     }
 
+    // the user has applications, just not to this job
     @Test
     public void testMovingAJobTheUserNeverAppliedTo() throws Exception {
-        mockMvc.perform(post("/api/users/bruh2000/applications/%s/next".formatted(jobId)))
+        apply("bruh2000", jobId);
+        String other = createJob("pm", "bumco", PM);
+
+        mockMvc.perform(post("/api/users/bruh2000/applied/%s/moveToNextStage".formatted(other)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message")
-                        .value("User has not applied to the [swe] role at [bumco] or has been removed"));
+                        .value("User has not applied to the [PRODUCT_MANAGER] role at [bumco] or has been removed"));
+    }
+
+    // no applications at all, which is a different branch with its own message
+    @Test
+    public void testMovingWhenTheUserHasAppliedToNothing() throws Exception {
+        mockMvc.perform(post("/api/users/bruh2000/applied/%s/moveToNextStage".formatted(jobId)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message")
+                        .value("User [bruh2000] has not applied to any jobs - can't move to next stage"));
     }
 
     private void setStages(String... stages) throws Exception {
         String quoted = String.join(", ", java.util.Arrays.stream(stages).map("\"%s\""::formatted).toList());
-        mockMvc.perform(put("/api/users/bruh2000/applications/%s/stages".formatted(jobId))
+        mockMvc.perform(put("/api/users/bruh2000/applied/%s/updateStages".formatted(jobId))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"stages": [%s], "currentStagePosition": 0}""".formatted(quoted)))

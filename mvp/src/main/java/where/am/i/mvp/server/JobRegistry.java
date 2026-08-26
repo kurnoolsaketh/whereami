@@ -1,38 +1,29 @@
 package where.am.i.mvp.server;
 
+import where.am.i.mvp.entities.Company;
 import where.am.i.mvp.entities.Job;
+import where.am.i.mvp.entities.Role;
 
 import java.io.IOException;
 import java.net.URL;
-import java.security.NoSuchAlgorithmException;
-import java.util.HashMap;
-import java.util.List;
+import java.util.*;
+import java.util.stream.Collectors;
 
 // TODO: should go in a database
 public class JobRegistry {
     HashMap<String, Job> jobIdToJob;
 
-    //TODO: the PipelineService argument is never used or stored - every caller has to build one
-    // just to construct a JobRegistry.
-    public JobRegistry(PipelineService pipelineService) {
+    public JobRegistry() {
         this.jobIdToJob = new HashMap<>();
     }
 
-    public String createJob(String title,
-                            String company,
-                            String description,
-                            String reqId,
-                            URL url) throws NoSuchAlgorithmException, IOException {
-        Job job = new Job(title, company, description, reqId, url);
-        if (jobIdToJob.containsKey(job.getId())) {
-            throw new IOException("Job already exists");
-        }
+    public Job createJob(String title,
+                            Company company,
+                            URL url,
+                            Role role) {
+        Job job = new Job(title, company, url, role, true);
         jobIdToJob.put(job.getId(), job);
-        return job.getId();
-    }
-
-    public List<Job> listJobs() {
-        return List.copyOf(jobIdToJob.values());
+        return job;
     }
 
     public Job getJob(String jobId) throws IOException {
@@ -44,5 +35,21 @@ public class JobRegistry {
             throw new IOException("Job [%s] does not exist".formatted(jobId));
         }
         return jobIdToJob.get(jobId);
+    }
+
+    public Set<Job> listJobs(Company company) {
+        return jobIdToJob.values().stream().filter(job -> job.company().equals(company)).collect(Collectors.toSet());
+    }
+
+    public Set<Job> listJobsForRole(Role role) {
+        return jobIdToJob.values().stream().filter(job -> job.role().equals(role)).collect(Collectors.toSet());
+    }
+
+    public Set<Job> listJobsForRoleAndCompany(Company company, Role role) {
+        return jobIdToJob.values().stream().filter(job -> job.company().equals(company)).filter(job -> job.role().equals(role)).collect(Collectors.toSet());
+    }
+
+    public Set<Company> listCompanies() {
+        return jobIdToJob.values().stream().map(Job::company).collect(Collectors.toSet());
     }
 }

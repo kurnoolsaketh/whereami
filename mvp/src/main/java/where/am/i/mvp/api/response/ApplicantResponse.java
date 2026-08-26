@@ -1,4 +1,4 @@
-package where.am.i.mvp.api;
+package where.am.i.mvp.api.response;
 
 import where.am.i.mvp.entities.Pipeline;
 import where.am.i.mvp.entities.User;
