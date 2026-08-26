@@ -18,7 +18,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/roles")
@@ -39,13 +38,20 @@ public class RolesController {
     }
 
     @GetMapping("/{company}")
-    public Set<String> listAllRolesUsersAppliedToForCompany(@PathVariable String company) throws IOException {
-        return jobRegistry.listJobs(companyRegistry.getOrThrow(company)).stream().map(job -> job.role().toString()).collect(Collectors.toSet());
+    public List<String> listAllRolesUsersAppliedToForCompany(@PathVariable String company) throws IOException {
+        return jobRegistry.listJobs(companyRegistry.getOrThrow(company)).stream()
+                .map(job -> job.role().toString())
+                .distinct()
+                .sorted()
+                .toList();
     }
 
     @GetMapping("/{role}/jobs")
-    public List<JobResponse> listJobsForRole(@PathVariable String role) {
-        return jobRegistry.listJobsForRole(Role.valueOf(role)).stream().map(JobResponse::from).toList();
+    public List<JobResponse> listJobsForRole(@PathVariable String role) throws IOException {
+        return jobRegistry.listJobsForRole(Role.fromName(role)).stream()
+                .map(JobResponse::from)
+                .sorted(JobResponse.BY_COMPANY_THEN_TITLE)
+                .toList();
     }
 
     // TODO: separate endpoint for level?
@@ -55,11 +61,11 @@ public class RolesController {
         for (User user : applicantService.listUsers()) {
             Set<Job> jobs = applicantService.listAppliedJobs(user);
             for (Job job : jobs) {
-                if (job.role().equals(Role.valueOf(role)) && job.company().equals(companyRegistry.getOrThrow(company))) {
+                if (job.role().equals(Role.fromName(role)) && job.company().equals(companyRegistry.getOrThrow(company))) {
                     applicants.add(ApplicantResponse.from(user, applicantService.getPipeline(user, job)));
                 }
             }
         }
-        return applicants;
+        return applicants.stream().sorted(ApplicantResponse.BY_USER_ID).toList();
     }
 }

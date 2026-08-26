@@ -1,4 +1,6 @@
 package where.am.i.mvp.api.request;
 
-public record ApplyRequest(String jobId, String level) {
+import where.am.i.mvp.entities.Level;
+
+public record ApplyRequest(String jobId, Level level) {
 }

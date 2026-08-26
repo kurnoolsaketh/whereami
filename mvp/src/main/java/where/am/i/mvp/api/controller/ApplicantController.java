@@ -45,7 +45,7 @@ public class ApplicantController {
                                      @RequestBody ApplyRequest request) throws IOException {
         User user = userRegistry.getUser(userId);
         Job job = jobRegistry.getJob(request.jobId());
-        applicantService.addApplied(user, job, Level.valueOf(request.level()));
+        applicantService.addApplied(user, job, request.level());
         return ApplicationResponse.from(job, applicantService.getPipeline(user, job));
     }
 

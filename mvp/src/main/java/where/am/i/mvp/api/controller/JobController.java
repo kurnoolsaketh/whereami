@@ -40,33 +40,33 @@ public class JobController {
 
 
     @GetMapping("/{company}/list")
-    public List<JobResponse> listJobs(@PathVariable String company) {
+    public List<JobResponse> listJobs(@PathVariable String company) throws IOException {
         if (!companyRegistry.exists(company)) {
             return Collections.emptyList();
         }
-        return jobRegistry.listJobs(new Company(company)).stream()
+        return jobRegistry.listJobs(companyRegistry.getOrThrow(company)).stream()
                 .map(JobResponse::from)
                 .sorted(JobResponse.BY_COMPANY_THEN_TITLE)
                 .toList();
     }
 
     @GetMapping("/{company}/{role}/list")
-    public List<JobResponse> listJobsForRoleAndCompany(@PathVariable String company, @PathVariable String role) {
+    public List<JobResponse> listJobsForRoleAndCompany(@PathVariable String company, @PathVariable String role) throws IOException {
         if (!companyRegistry.exists(company)) {
             return Collections.emptyList();
         }
-        return jobRegistry.listJobsForRoleAndCompany(new Company(company), Role.valueOf(role)).stream()
+        return jobRegistry.listJobsForRoleAndCompany(companyRegistry.getOrThrow(company), Role.fromName(role)).stream()
                 .map(JobResponse::from)
                 .sorted(JobResponse.BY_COMPANY_THEN_TITLE)
                 .toList();
     }
 
-    @PostMapping("/new")
+    @PostMapping("/{company}/new")
     public JobResponse createJob(@PathVariable String company, @RequestBody CreateJobRequest request) throws IOException {
         if (!companyRegistry.exists(company)) {
             companyRegistry.newCompany(company);
         }
-        Job job = jobRegistry.createJob(request.title(), new Company(company), parseUrl(request.url()), Role.valueOf(request.role()));
+        Job job = jobRegistry.createJob(request.title(), companyRegistry.getOrThrow(company), parseUrl(request.url()), Role.fromName(request.role()));
         return JobResponse.from(job);
     }
 

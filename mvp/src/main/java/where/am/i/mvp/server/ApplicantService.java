@@ -51,7 +51,7 @@ public class ApplicantService {
         }
         Pipeline pipeline = jobToPipeline.get(job);
         if (pipeline == null) {
-            throw new IOException("No stages found for job [%s]".formatted(job));
+            throw new IOException("User has not applied to the [%s] role at [%s] or has been removed".formatted(job.role().name(), job.company().name()));
         }
         int currentPos = pipeline.getCurrentStagePosition();
         pipeline.moveToStage(currentPos+1);
@@ -64,7 +64,7 @@ public class ApplicantService {
         }
         Pipeline pipeline = jobToPipeline.get(job);
         if (pipeline == null) {
-            throw new IOException("No stages found for job [%s]".formatted(job));
+            throw new IOException("User has not applied to the [%s] role at [%s] or has been removed".formatted(job.role().name(), job.company().name()));
         }
         pipeline.moveToStage(newPos);
     }
@@ -76,7 +76,7 @@ public class ApplicantService {
         }
         Pipeline pipeline = jobToPipeline.get(job);
         if (pipeline == null) {
-            throw new IOException("No pipeline found for job [%s]".formatted(job));
+            throw new IOException("User has not applied to the [%s] role at [%s] or has been removed".formatted(job.role().name(), job.company().name()));
         }
         return pipeline;
     }
