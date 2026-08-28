@@ -2,10 +2,12 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { RequireSession } from './session/RequireSession'
 import { AddJob } from './routes/AddJob'
 import { AppLayout } from './routes/AppLayout'
-import { BrowseJobs } from './routes/BrowseJobs'
-import { JobDetail } from './routes/JobDetail'
+import { Applied } from './routes/Applied'
+import { Browse } from './routes/Browse'
 import { MyApplications } from './routes/MyApplications'
+import { RoleView } from './routes/RoleView'
 import { SignIn } from './routes/SignIn'
+import { UserProfile } from './routes/UserProfile'
 
 export default function App() {
   return (
@@ -14,10 +16,14 @@ export default function App() {
       <Route element={<RequireSession />}>
         <Route element={<AppLayout />}>
           <Route path="/" element={<MyApplications />} />
-          <Route path="/jobs" element={<BrowseJobs />} />
+          <Route path="/browse" element={<Browse />} />
           <Route path="/jobs/new" element={<AddJob />} />
-          {/* keyed by job id, so a job detail link opens on its own in a new tab */}
-          <Route path="/jobs/:jobId" element={<JobDetail />} />
+          {/* your own pipeline on one posting, keyed by job id so a link opens on its own */}
+          <Route path="/applied/:jobId" element={<Applied />} />
+          {/* everyone on one role at one company. both segments carry spaces, so both are
+              encoded in every link that points here */}
+          <Route path="/roles/:company/:role" element={<RoleView />} />
+          <Route path="/users/:userId" element={<UserProfile />} />
         </Route>
       </Route>
       {/* anything unrecognised goes to the home route, which is itself behind the session */}

@@ -2,44 +2,43 @@ import { useCallback, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
+  deleteApplication,
   getJob,
-  listApplicants,
   listApplications,
   listStages,
+  listStatuses,
   moveToNextStage,
   moveToStage,
   updateStages,
-  withdrawFromJob,
+  updateStatus,
 } from '../api/client'
-import type { Applicant, Pipeline, Stage } from '../api/types'
+import type { Pipeline, Stage } from '../api/types'
 import { useLoad } from '../api/useLoad'
-import {
-  currentStageLabel,
-  labelStages,
-  stageKey,
-  stageName,
-  tallyStages,
-  UNKNOWN_STAGE,
-} from '../pipeline/stages'
+import { currentStageLabel, enumLabel, labelStages } from '../pipeline/stages'
+import { ACTIVE, isActive, outcomes, statusLabel } from '../pipeline/status'
 import { useSession } from '../session/SessionContext'
+import { roleUrl } from './links'
 
-// your pipeline on one job. keyed by job id, so this opens straight from a link in a new tab
-export function JobDetail() {
+// your own pipeline on one posting: the rounds you were told about, where you stand in them,
+// and how it ended if it has. everyone *else* on this role lives on the role view, not here
+export function Applied() {
   const { jobId = '' } = useParams<{ jobId: string }>()
   const navigate = useNavigate()
   const { user } = useSession()
   const userId = user!.userId
 
   const load = useCallback(async () => {
-    const [job, allStages, applications, applicants] = await Promise.all([
+    const [job, allStages, allStatuses, applications] = await Promise.all([
       getJob(jobId),
       listStages(),
+      listStatuses(),
       listApplications(userId),
-      listApplicants(jobId),
     ])
-    // there is no endpoint for a single application, so your pipeline comes out of your list
+    // there is no endpoint for a single application, so your pipeline comes out of your list.
+    // getJob is fetched separately because the header still has to render when you have not
+    // applied, and that case has no application to read the job from
     const mine = applications.find((application) => application.job.jobId === jobId)
-    return { job, allStages, applicants, pipeline: mine?.pipeline ?? null }
+    return { job, allStages, allStatuses, pipeline: mine?.pipeline ?? null }
   }, [jobId, userId])
 
   const { data, error, loading, reload } = useLoad(load)
@@ -48,7 +47,7 @@ export function JobDetail() {
   const [busy, setBusy] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
-  const [confirmingWithdraw, setConfirmingWithdraw] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   // a rejected save leaves its message on screen, so opening or abandoning the form clears it -
   // it is about a draft that is no longer there
@@ -73,14 +72,14 @@ export function JobDetail() {
   }
 
   // not run(), because there is nothing left on this route to reload afterwards
-  async function withdraw() {
+  async function erase() {
     setActionError(null)
-    setBusy('withdraw')
+    setBusy('delete')
     try {
-      await withdrawFromJob(userId, jobId)
+      await deleteApplication(userId, jobId)
       navigate('/')
     } catch (failure) {
-      setActionError(failure instanceof Error ? failure.message : 'Could not withdraw')
+      setActionError(failure instanceof Error ? failure.message : 'Could not delete that record')
       setBusy(null)
     }
   }
@@ -108,7 +107,10 @@ export function JobDetail() {
         <>
           <h2>{data.job.title}</h2>
           <p className="subtitle">
-            {data.job.company} <code>{data.job.reqId}</code>
+            <Link to={roleUrl(data.job.company, data.job.role)}>
+              {data.job.company} · {data.job.role}
+            </Link>{' '}
+            — see everyone on this role
           </p>
           {/* a plain anchor, not a react-router Link - the posting is on someone else's site */}
           <p className="subtitle">
@@ -116,81 +118,161 @@ export function JobDetail() {
               View the posting
             </a>
           </p>
-          {data.job.description !== '' && <p>{data.job.description}</p>}
 
           {data.pipeline === null ? (
             <p className="notice">
-              You have not applied to this job. <Link to="/jobs">Browse jobs</Link> to apply.
+              You have not recorded an application to this posting.{' '}
+              <Link to={roleUrl(data.job.company, data.job.role)}>Open the role</Link> to add one.
             </p>
           ) : (
             <>
               <div className="card">
                 <h3>Your pipeline</h3>
-                <p className="stage">{currentStageLabel(data.pipeline)}</p>
-
-                <StageList
-                  pipeline={data.pipeline}
-                  busy={busy !== null}
-                  onJump={(position) =>
-                    void run('position', () => moveToStage(userId, jobId, position))
-                  }
-                />
-
-                <div className="actions">
-                  <button
-                    type="button"
-                    disabled={busy !== null || atLastStage(data.pipeline)}
-                    onClick={() => void run('next', () => moveToNextStage(userId, jobId))}
-                  >
-                    {busy === 'next' ? 'Moving...' : 'Move to next stage'}
-                  </button>
-                  {atLastStage(data.pipeline) && (
-                    <span className="hint">This is the last stage in your pipeline.</span>
+                <p className="stage">
+                  {currentStageLabel(data.pipeline)}
+                  {!isActive(data.pipeline) && (
+                    <span className="tag">{statusLabel(data.pipeline.status)}</span>
                   )}
+                </p>
+
+                {isActive(data.pipeline) ? (
+                  <>
+                    <StageList
+                      pipeline={data.pipeline}
+                      busy={busy !== null}
+                      onJump={(position) =>
+                        void run('position', () => moveToStage(userId, jobId, position))
+                      }
+                    />
+
+                    <div className="actions">
+                      <button
+                        type="button"
+                        disabled={busy !== null || atLastStage(data.pipeline)}
+                        onClick={() => void run('next', () => moveToNextStage(userId, jobId))}
+                      >
+                        {busy === 'next' ? 'Moving...' : 'Move to next stage'}
+                      </button>
+                      {atLastStage(data.pipeline) && (
+                        <span className="hint">This is the last stage in your pipeline.</span>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  // moving through stages on an ended application makes no sense, so the
+                  // controls go away rather than sitting there disabled. the rounds stay
+                  // visible - they are what this application contributes to the role's graph
+                  <>
+                    <ol className="pipeline">
+                      {labelStages(data.pipeline.stages).map((entry, index) => (
+                        <li
+                          key={index}
+                          className={
+                            index === data.pipeline!.currentStagePosition ? 'current' : undefined
+                          }
+                        >
+                          <span>{entry.label}</span>
+                          {index === data.pipeline!.currentStagePosition && (
+                            <span className="hint">Where it ended</span>
+                          )}
+                        </li>
+                      ))}
+                    </ol>
+                    <div className="actions">
+                      <button
+                        type="button"
+                        disabled={busy !== null}
+                        onClick={() =>
+                          void run('status', () => updateStatus(userId, jobId, ACTIVE))
+                        }
+                      >
+                        {busy === 'status' ? 'Reopening...' : 'Reopen'}
+                      </button>
+                      <span className="hint">
+                        Reopening loses nothing — your rounds were never changed to record the
+                        outcome.
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {isActive(data.pipeline) &&
+                (editing ? (
+                  <StageEditor
+                    // the draft is seeded from the pipeline, so a jump made while the form is
+                    // open has to reseed it rather than leave a stale draft on screen
+                    key={`${data.pipeline.currentStagePosition}@${data.pipeline.stages.join(',')}`}
+                    pipeline={data.pipeline}
+                    allStages={data.allStages}
+                    saving={busy === 'stages'}
+                    onSave={(stages, position) => void save(stages, position)}
+                    onCancel={() => setEditingForm(false)}
+                  />
+                ) : (
+                  <div className="actions">
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={busy !== null}
+                      onClick={() => setEditingForm(true)}
+                    >
+                      Edit stages
+                    </button>
+                  </div>
+                ))}
+
+              <div className="card">
+                <h3>How did it end?</h3>
+                {/* one button per non-ACTIVE value the backend listed, in the order it listed
+                    them, labelled from the constant name. a status added to the enum later
+                    gets its own button with no change here - which is why none is named */}
+                <p>
+                  Recording an outcome keeps your rounds exactly as they are, and it can be
+                  undone at any time.
+                </p>
+                <div className="actions">
+                  {outcomes(data.allStatuses).map((status) => (
+                    <button
+                      key={status}
+                      type="button"
+                      className="secondary"
+                      disabled={busy !== null || data.pipeline?.status === status}
+                      onClick={() =>
+                        void run('status', () => updateStatus(userId, jobId, status))
+                      }
+                    >
+                      {statusLabel(status)}
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              {editing ? (
-                <StageEditor
-                  // the draft is seeded from the pipeline, so a jump made while the form is open
-                  // has to reseed it rather than leave a stale draft on screen
-                  key={`${data.pipeline.currentStagePosition}@${data.pipeline.stages.join(',')}`}
-                  pipeline={data.pipeline}
-                  allStages={data.allStages}
-                  saving={busy === 'stages'}
-                  onSave={(stages, position) => void save(stages, position)}
-                  onCancel={() => setEditingForm(false)}
-                />
-              ) : (
-                <div className="actions">
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={busy !== null}
-                    onClick={() => setEditingForm(true)}
-                  >
-                    Edit stages
-                  </button>
-                </div>
-              )}
-
+              {/* the only irreversible action on the screen, and the only thing wearing
+                  .danger. an outcome records what happened and keeps this pipeline shaping the
+                  role's graph; deleting erases a record made by mistake and takes its
+                  contribution with it */}
               <div className="actions">
-                {confirmingWithdraw ? (
+                {confirmingDelete ? (
                   <>
-                    <span className="hint">Withdraw from this job? Your pipeline is lost.</span>
+                    <span className="hint">
+                      Delete this record permanently? It is erased for good — this cannot be
+                      reopened, and the role's pipeline loses what it contributed. To record that
+                      the application ended, use an outcome above instead.
+                    </span>
                     <button
                       type="button"
                       className="danger"
                       disabled={busy !== null}
-                      onClick={() => void withdraw()}
+                      onClick={() => void erase()}
                     >
-                      {busy === 'withdraw' ? 'Withdrawing...' : 'Yes, withdraw'}
+                      {busy === 'delete' ? 'Deleting...' : 'Yes, delete'}
                     </button>
                     <button
                       type="button"
                       className="secondary"
                       disabled={busy !== null}
-                      onClick={() => setConfirmingWithdraw(false)}
+                      onClick={() => setConfirmingDelete(false)}
                     >
                       Keep it
                     </button>
@@ -200,25 +282,14 @@ export function JobDetail() {
                     type="button"
                     className="danger"
                     disabled={busy !== null}
-                    onClick={() => setConfirmingWithdraw(true)}
+                    onClick={() => setConfirmingDelete(true)}
                   >
-                    Withdraw from this job
+                    Delete this record
                   </button>
                 )}
               </div>
             </>
           )}
-
-          <div className="card">
-            <div className="section-header">
-              <h3>Where everyone is</h3>
-              {/* nothing pushes another tab's move to this one, so the way to see it is to ask */}
-              <button type="button" className="secondary" disabled={loading} onClick={reload}>
-                {loading ? 'Refreshing...' : 'Refresh'}
-              </button>
-            </div>
-            <Applicants applicants={data.applicants} allStages={data.allStages} youId={userId} />
-          </div>
         </>
       )}
     </section>
@@ -228,58 +299,6 @@ export function JobDetail() {
 // moveToNextStage asks for position + 1, which the backend rejects past the end of the list
 function atLastStage(pipeline: Pipeline): boolean {
   return pipeline.currentStagePosition >= pipeline.stages.length - 1
-}
-
-interface ApplicantsProps {
-  applicants: Applicant[]
-  allStages: Stage[]
-  youId: string
-}
-
-// everyone on this job and the round each of them is at, plus a head count per round. the tally
-// groups on (stage, occurrence) and the rows read their label back out of it, so a row and the
-// count it belongs to always say the same words - someone with one technical round and someone
-// with two are both at their first, however their own pipelines happen to label it
-function Applicants({ applicants, allStages, youId }: ApplicantsProps) {
-  if (applicants.length === 0) {
-    return <p>No one has recorded an application to this job yet.</p>
-  }
-
-  const tallies = tallyStages(
-    applicants.map((applicant) => applicant.pipeline),
-    allStages,
-  )
-  const labels = new Map(tallies.map((tally) => [tally.key, tally.label]))
-
-  return (
-    <>
-      <ul className="tally">
-        {tallies.map((tally) => (
-          <li key={tally.key}>
-            <span>{tally.label}</span>
-            <span className="count">{tally.count}</span>
-          </li>
-        ))}
-      </ul>
-
-      <ul className="applicants">
-        {applicants.map(({ user, pipeline }) => (
-          <li key={user.userId}>
-            <span className="applicant">
-              {user.firstName} {user.lastName}
-              {user.userId === youId && <span className="badge">you</span>}
-            </span>
-            <span className="stage">{labels.get(stageKey(pipeline)) ?? UNKNOWN_STAGE}</span>
-            {/* two people at the same round can be walking different pipelines, so say how long
-                each one's is rather than let the shared label imply they match */}
-            <span className="hint">
-              {pipeline.currentStagePosition + 1} of {pipeline.stages.length}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </>
-  )
 }
 
 interface StageListProps {
@@ -367,7 +386,7 @@ function StageEditor({ pipeline, allStages, saving, onSave, onCancel }: StageEdi
               >
                 {allStages.map((option) => (
                   <option key={option} value={option}>
-                    {stageName(option)}
+                    {enumLabel(option)}
                   </option>
                 ))}
               </select>

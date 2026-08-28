@@ -1,4 +1,4 @@
-import type { Pipeline, Stage } from '../api/types'
+import type { Pipeline, Stage, Status } from '../api/types'
 
 // turning a stages array into display labels, for the three screens that need it: your
 // applications, your pipeline on a job, and where the other applicants are
@@ -26,7 +26,7 @@ export function labelStages(stages: Stage[]): LabelledStage[] {
   return stages.map((stage) => {
     const occurrence = (soFar.get(stage) ?? 0) + 1
     soFar.set(stage, occurrence)
-    const name = stageName(stage)
+    const name = enumLabel(stage)
     return { stage, occurrence, label: totals.get(stage) === 1 ? name : `${name} ${occurrence}` }
   })
 }
@@ -97,7 +97,7 @@ function tallyLabel(at: LabelledStage | null, occupied: Map<Stage, number>): str
   if (at === null) {
     return UNKNOWN_STAGE
   }
-  return occupied.get(at.stage) === 1 ? stageName(at.stage) : `${stageName(at.stage)} ${at.occurrence}`
+  return occupied.get(at.stage) === 1 ? enumLabel(at.stage) : `${enumLabel(at.stage)} ${at.occurrence}`
 }
 
 // a stage the enum no longer lists, and the unknown bucket, sort to the end rather than to the
@@ -110,10 +110,12 @@ function rank(at: LabelledStage | null, order: Stage[]): number {
   return index === -1 ? order.length : index
 }
 
-// TECHNICAL_ROUND -> Technical Round. the stage picker names stages one at a time, with no list
-// to count occurrences against, so it wants this rather than a label
-export function stageName(stage: Stage): string {
-  return stage
+// TECHNICAL_ROUND -> Technical Round, USER_WITHDREW -> User Withdrew. serves Stage and Status
+// both, which is why it is not named for either: neither enum overrides toString on the
+// backend, so both arrive as constant names and are titled the same way. Role and Level do
+// override it and must never be passed through here - they arrive readable already
+export function enumLabel(constant: Stage | Status): string {
+  return constant
     .split('_')
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
     .join(' ')

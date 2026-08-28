@@ -353,3 +353,81 @@ button:disabled {
   color: var(--error-text);
   font-size: 0.9rem;
 }
+
+/* the outcome on an application that has ended, beside the round it ended at */
+.tag {
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+  vertical-align: middle;
+}
+
+/* browse: companies expand to the roles recorded at them. there is no endpoint listing every
+   job any more, so this two-level list is the whole of browse */
+.companies {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.companies > li {
+  border-bottom: 1px solid var(--border);
+}
+
+.companies .toggle {
+  width: 100%;
+  align-self: auto;
+  padding: 0.75rem 0.25rem;
+  background-color: transparent;
+  border-color: transparent;
+  color: var(--text);
+  font-size: 1rem;
+  text-align: left;
+}
+
+.companies .toggle:hover {
+  color: var(--accent);
+}
+
+.roles {
+  padding: 0 0 0.75rem 1.5rem;
+}
+
+.roles ul {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+/* the add-job form picks a role and a level, so selects need the same treatment as inputs
+   outside the stage editor too */
+select {
+  font: inherit;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background-color: var(--surface);
+  color: var(--text);
+}
+
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* an ended pipeline lists its rounds as text rather than as jump buttons */
+.pipeline li > span:first-child {
+  padding: 0.35rem 0;
+}
+
+.pipeline .current > span:first-child {
+  color: var(--accent);
+  font-weight: 600;
+}
