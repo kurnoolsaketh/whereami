@@ -27,6 +27,12 @@ public class ApplicantService {
     }
 
     public void updateStatus(User user, Job job, Pipeline.Status newStatus) throws IOException {
+        // without this an empty body, or {"newStatus": null}, silently sets status to null,
+        // which then serializes as null and makes every screen think the application is neither
+        // active nor ended. every other mutator here validates; this one used to be the gap
+        if (newStatus == null) {
+            throw new IOException("newStatus is required");
+        }
         var jobToPipeline = applicantToPipelines.get(user);
         if (jobToPipeline == null) {
             throw new IOException("User [%s] has not applied to any jobs".formatted(user.userId()));

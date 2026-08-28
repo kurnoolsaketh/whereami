@@ -342,6 +342,116 @@ public class ApplicantControllerTest {
                 .andExpect(jsonPath("$.message", startsWith("User [bruh2000] has not applied to job")));
     }
 
+    // --- the status work, hardened ---
+
+    @Test
+    public void testUpdateStatusRejectsANullStatus() throws Exception {
+        apply("bruh2000", jobId);
+
+        mockMvc.perform(put("/api/users/bruh2000/applied/%s/updateStatus".formatted(jobId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"newStatus": null}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("newStatus is required"));
+
+        // and the application is untouched, not left holding a null status
+        mockMvc.perform(get("/api/users/bruh2000/applied"))
+                .andExpect(jsonPath("$[0].pipeline.status").value("ACTIVE"));
+    }
+
+    @Test
+    public void testUpdateStatusRejectsAnEmptyBody() throws Exception {
+        apply("bruh2000", jobId);
+
+        mockMvc.perform(put("/api/users/bruh2000/applied/%s/updateStatus".formatted(jobId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("newStatus is required"));
+    }
+
+    // an unparseable enum is rejected by Spring before the controller runs, so this exercises
+    // ApiExceptionHandler's second handler rather than any validation of ours. what matters is
+    // that it still arrives as an ErrorResponse - the frontend reads `message` and nothing else
+    @Test
+    public void testUnknownStatusStillCarriesAMessage() throws Exception {
+        apply("bruh2000", jobId);
+
+        mockMvc.perform(put("/api/users/bruh2000/applied/%s/updateStatus".formatted(jobId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"newStatus": "BOGUS"}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").isNotEmpty());
+    }
+
+    // the same handler covers every unparseable body, not just statuses
+    @Test
+    public void testUnknownStageAndLevelAlsoCarryAMessage() throws Exception {
+        apply("bruh2000", jobId);
+
+        mockMvc.perform(put("/api/users/bruh2000/applied/%s/updateStages".formatted(jobId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"stages": ["APPLIED", "INTERPRETIVE_DANCE"], "currentStagePosition": 0}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").isNotEmpty());
+
+        mockMvc.perform(post("/api/users/bruh2000/apply")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"jobId": "%s", "level": "Overlord"}""".formatted(jobId)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").isNotEmpty());
+    }
+
+    // an application that ended is a record of what happened, so its rounds stop moving
+    @Test
+    public void testStageChangesAreRefusedOnATerminatedPipeline() throws Exception {
+        apply("bruh2000", jobId);
+        setStages("APPLIED", "TECHNICAL_ROUND", "ONSITE");
+        setStatus("REJECTED");
+
+        mockMvc.perform(post("/api/users/bruh2000/applied/%s/moveToNextStage".formatted(jobId)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message", startsWith("Cannot move an application that ended with [REJECTED]")));
+
+        mockMvc.perform(put("/api/users/bruh2000/applied/%s/moveToStage".formatted(jobId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"currentStagePosition": 2}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message", startsWith("Cannot move an application that ended with [REJECTED]")));
+
+        mockMvc.perform(put("/api/users/bruh2000/applied/%s/updateStages".formatted(jobId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"stages": ["APPLIED"], "currentStagePosition": 0}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message",
+                        startsWith("Cannot change the stages of an application that ended with [REJECTED]")));
+    }
+
+    // ...and reopening lifts the guard, with the stage list intact through the whole round trip
+    @Test
+    public void testReopeningRestoresStageChangesWithTheListIntact() throws Exception {
+        apply("bruh2000", jobId);
+        setStages("APPLIED", "TECHNICAL_ROUND", "ONSITE");
+        setStatus("OFFER");
+        setStatus("ACTIVE");
+
+        mockMvc.perform(post("/api/users/bruh2000/applied/%s/moveToNextStage".formatted(jobId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.pipeline.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.pipeline.currentStagePosition").value(1))
+                // the rounds survived being ended and reopened, because neither touched them
+                .andExpect(jsonPath("$.pipeline.stages.length()").value(3))
+                .andExpect(jsonPath("$.pipeline.stages[0]").value("APPLIED"))
+                .andExpect(jsonPath("$.pipeline.stages[1]").value("TECHNICAL_ROUND"))
+                .andExpect(jsonPath("$.pipeline.stages[2]").value("ONSITE"));
+    }
+
     private void setStatus(String status) throws Exception {
         mockMvc.perform(put("/api/users/bruh2000/applied/%s/updateStatus".formatted(jobId))
                         .contentType(MediaType.APPLICATION_JSON)
