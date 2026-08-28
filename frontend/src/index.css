@@ -461,3 +461,76 @@ select:focus-visible {
   align-items: center;
   gap: 0.35rem;
 }
+
+/* the role view needs more room than the 44rem every other screen is built for. scoped with
+   :has rather than by changing the global rule, which the rest of the app depends on */
+main:has(.role-view) {
+  max-width: 72rem;
+}
+
+.graph {
+  height: 26rem;
+  margin-top: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--bg);
+}
+
+/* React Flow ships its own node chrome; these are our own nodes, so they take the app's
+   surface, border and accent rather than the library's defaults */
+.graph-node {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  background-color: var(--surface);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.graph-stage {
+  border-radius: 6px;
+}
+
+/* an outcome is a result, not a round to walk through, so the final column reads as an ending
+   at a glance rather than as more of the same */
+.graph-outcome {
+  border-radius: 999px;
+  border-style: dashed;
+  background-color: var(--bg);
+  color: var(--muted);
+}
+
+.graph-node.picked {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.graph-node.dimmed {
+  opacity: 0.45;
+}
+
+.graph-label {
+  font-weight: 600;
+}
+
+.graph-outcome .graph-label {
+  font-weight: 500;
+}
+
+.graph-count {
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background-color: var(--accent);
+  color: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+/* the loop handles exist to route back edges away from the main chain, not to be interacted
+   with - React Flow's default handle dots would otherwise be four specks on every node */
+.graph-node .react-flow__handle {
+  opacity: 0;
+  pointer-events: none;
+}

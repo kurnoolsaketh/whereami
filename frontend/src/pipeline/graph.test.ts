@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import type { Pipeline, Stage, Status } from '../api/types'
-import { buildGraph } from './graph'
+import { buildGraph, nodeHolds } from './graph'
 
 const STAGES: Stage[] = [
   'APPLIED',
@@ -246,4 +246,30 @@ it('handles no pipelines at all', () => {
   expect(g.nodes).toEqual([])
   expect(g.edges).toEqual([])
   expect(g.columns).toBe(0)
+})
+
+// nodeHolds is what the roster filters by, so it has to agree with the badge exactly
+it('nodeHolds selects exactly the pipelines a badge is counting', () => {
+  const pipelines = [
+    pipeline([A, T, T, O], 2),
+    pipeline([A, T, O], 1),
+    pipeline([A, T, T, T, O], 3, 'REJECTED'),
+    pipeline([A, R, O], 1, 'OFFER'),
+  ]
+  const g = graph(pipelines)
+
+  for (const node of g.nodes) {
+    expect(
+      pipelines.filter((candidate) => nodeHolds(candidate, node)),
+      `node ${node.id}`,
+    ).toHaveLength(node.count)
+  }
+})
+
+it('nodeHolds keeps a terminated pipeline off the stage it stopped at', () => {
+  const stopped = pipeline([A, T, O], 1, 'REJECTED')
+  const g = graph([pipeline([A, T, O], 1), stopped])
+
+  expect(nodeHolds(stopped, nodeAt(g, 'TECHNICAL_ROUND#1'))).toBe(false)
+  expect(nodeHolds(stopped, nodeAt(g, 'REJECTED'))).toBe(true)
 })

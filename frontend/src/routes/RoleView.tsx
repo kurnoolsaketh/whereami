@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   applyToJob,
@@ -7,10 +7,13 @@ import {
   listJobsForCompanyAndRole,
   listLevels,
   listStages,
+  listStatuses,
 } from '../api/client'
-import type { Applicant, Job, Level, Stage } from '../api/types'
+import type { Applicant, Job, Level } from '../api/types'
 import { useLoad } from '../api/useLoad'
-import { currentStageLabel, stageKey, tallyStages } from '../pipeline/stages'
+import { buildGraph, nodeHolds } from '../pipeline/graph'
+import { PipelineGraph } from '../pipeline/PipelineGraph'
+import { currentStageLabel, stageKey } from '../pipeline/stages'
 import { isActive, statusLabel } from '../pipeline/status'
 import { useSession } from '../session/SessionContext'
 import { appliedUrl, profileUrl } from './links'
@@ -24,11 +27,12 @@ export function RoleView() {
   const userId = user!.userId
 
   const load = useCallback(async () => {
-    const [applicants, jobs, allStages, allLevels, applications] = await Promise.all([
+    const [applicants, jobs, allStages, allLevels, allStatuses, applications] = await Promise.all([
       listApplicantsForCompanyAndRole(company, role),
       listJobsForCompanyAndRole(company, role),
       listStages(),
       listLevels(),
+      listStatuses(),
       listApplications(userId),
     ])
     return {
@@ -36,6 +40,7 @@ export function RoleView() {
       jobs,
       allStages,
       allLevels,
+      allStatuses,
       mine: new Set(applications.map((application) => application.job.jobId)),
     }
   }, [company, role, userId])
@@ -44,6 +49,20 @@ export function RoleView() {
 
   const [applying, setApplying] = useState<string | null>(null)
   const [applyError, setApplyError] = useState<string | null>(null)
+  // the id of the graph node the roster is filtered to, or null for everyone
+  const [selected, setSelected] = useState<string | null>(null)
+
+  const graph = useMemo(
+    () =>
+      data === null
+        ? null
+        : buildGraph(
+            data.applicants.map((applicant) => applicant.pipeline),
+            data.allStages,
+            data.allStatuses,
+          ),
+    [data],
+  )
 
   async function apply(jobId: string, level: Level) {
     setApplyError(null)
@@ -58,8 +77,16 @@ export function RoleView() {
     }
   }
 
+  const selectedNode = graph?.nodes.find((node) => node.id === selected) ?? null
+  // the filtered panel is the same roster with a filtered array - not a second component, or
+  // the two lists would drift and the filtered one would quietly lose its profile links
+  const shown =
+    data === null || selectedNode === null
+      ? (data?.applicants ?? [])
+      : data.applicants.filter((applicant) => nodeHolds(applicant.pipeline, selectedNode))
+
   return (
-    <section>
+    <section className="role-view">
       <div className="section-header">
         <div>
           <h2>{role}</h2>
@@ -98,13 +125,42 @@ export function RoleView() {
             )}
           </div>
 
+          {graph !== null && graph.nodes.length > 0 && (
+            <div className="card">
+              <h3>The pipeline for this role</h3>
+              <p>
+                Every ordering anyone recorded, laid over each other. A badge counts the people
+                standing there now; a line's thickness is how many recorded that step. Click a
+                node to see who is on it.
+              </p>
+              <PipelineGraph
+                nodes={graph.nodes}
+                edges={graph.edges}
+                selected={selected}
+                onSelect={setSelected}
+              />
+            </div>
+          )}
+
           <div className="card">
-            <h3>Where everyone is</h3>
+            <div className="section-header">
+              <h3>{selectedNode === null ? 'Where everyone is' : selectedNode.label}</h3>
+              {selectedNode !== null && (
+                <button type="button" className="secondary" onClick={() => setSelected(null)}>
+                  Show all ({data.applicants.length})
+                </button>
+              )}
+            </div>
             <Roster
-              applicants={data.applicants}
+              applicants={shown}
               jobsById={new Map(data.jobs.map((job) => [job.jobId, job]))}
-              allStages={data.allStages}
+              labels={new Map((graph?.nodes ?? []).map((node) => [node.id, node.label]))}
               youId={userId}
+              empty={
+                selectedNode === null
+                  ? 'No one has recorded an application to this role yet.'
+                  : 'Nobody is at this node.'
+              }
             />
           </div>
         </>
@@ -176,24 +232,19 @@ function Posting({ job, applied, levels, busy, saving, onApply }: PostingProps) 
 interface RosterProps {
   applicants: Applicant[]
   jobsById: Map<string, Job>
-  allStages: Stage[]
+  // node id -> label, taken from the graph so a row and its node always read the same words.
+  // it must be built from every applicant, never from a filtered subset: derived from the
+  // people at one node, "Technical Round 1" would collapse back to "Technical Round"
+  labels: Map<string, string>
   youId: string
+  empty: string
 }
 
-// everyone on this role and the round each of them is at. the labels come from tallyStages, so
-// a row reads the round the way the whole role agrees to read it: someone with one technical
-// round and someone with two are both at their first, however their own pipelines label it
-export function Roster({ applicants, jobsById, allStages, youId }: RosterProps) {
+// everyone on this role and the round each of them is at
+export function Roster({ applicants, jobsById, labels, youId, empty }: RosterProps) {
   if (applicants.length === 0) {
-    return <p>No one has recorded an application to this role yet.</p>
+    return <p>{empty}</p>
   }
-
-  const labels = new Map(
-    tallyStages(
-      applicants.map((applicant) => applicant.pipeline),
-      allStages,
-    ).map((tally) => [tally.key, tally.label]),
-  )
 
   return (
     <ul className="applicants">

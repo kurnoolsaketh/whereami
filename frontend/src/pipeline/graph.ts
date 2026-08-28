@@ -158,6 +158,15 @@ export function buildGraph(
   }
 }
 
+// which pipelines a node's badge is counting. clicking a node filters the roster through this,
+// so the filtered list always has exactly as many rows as the badge claims - the same rule
+// step 6 counts by, written once so the two cannot drift apart
+export function nodeHolds(pipeline: Pipeline, node: GraphNode): boolean {
+  return node.kind === 'outcome'
+    ? !isActive(pipeline) && pipeline.status === node.id
+    : isActive(pipeline) && stageKey(pipeline) === node.id
+}
+
 function bump(edges: Map<string, Edge>, source: string, target: string): void {
   const id = `${source}->${target}`
   const existing = edges.get(id)
