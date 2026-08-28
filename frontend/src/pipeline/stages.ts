@@ -87,10 +87,17 @@ export function tallyStages(pipelines: Pipeline[], order: Stage[]): StageTally[]
     .map(({ at, count }) => ({ key: keyOf(at), label: tallyLabel(at, occupied), count }))
 }
 
-const UNKNOWN_KEY = '?'
+export const UNKNOWN_KEY = '?'
+
+// the id format for a (stage, occurrence) pair, defined once. graph.ts names its stage nodes
+// with this and the roster filters on stageKey, so the two are the same string by construction
+// rather than by two call sites agreeing to format it the same way
+export function nodeKey(stage: Stage, occurrence: number): string {
+  return `${stage}#${occurrence}`
+}
 
 function keyOf(at: LabelledStage | null): string {
-  return at === null ? UNKNOWN_KEY : `${at.stage}#${at.occurrence}`
+  return at === null ? UNKNOWN_KEY : nodeKey(at.stage, at.occurrence)
 }
 
 function tallyLabel(at: LabelledStage | null, occupied: Map<Stage, number>): string {
