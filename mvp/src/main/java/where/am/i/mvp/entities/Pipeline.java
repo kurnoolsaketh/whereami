@@ -8,11 +8,15 @@ public class Pipeline {
     List<Stage> stages;
     int position = 0;
     final Level level;
+    final String jobId;
+    Status status;
 
-    public Pipeline(Level level) {
+    public Pipeline(Level level, String jobId) {
         this.stages = new ArrayList<>();
         stages.add(Stage.APPLIED);
         this.level = level;
+        this.jobId = jobId;
+        this.status = Status.ACTIVE;
     }
 
     //TODO: every validation failure in mvp - here, in Pipeline.moveToStage, in User.getPipeline
@@ -45,6 +49,14 @@ public class Pipeline {
         this.position = newPos;
     }
 
+    public void updateStatus(Status newStatus) {
+        this.status = newStatus;
+    }
+
+    public Status getStatus() {
+        return this.status;
+    }
+
     public List<Stage> getStages() {
         return List.copyOf(stages);
     }
@@ -61,13 +73,23 @@ public class Pipeline {
         return level;
     }
 
+    public String getJobId() {
+        return jobId;
+    }
+
     public enum Stage {
         APPLIED,
         RECRUITER_SCREEN,
         HIRING_MANAGER_SCREEN,
         TECHNICAL_ROUND,
         BEHAVIORAL_ROUND,
-        ONSITE,
-        OFFER;
+        ONSITE;
+    }
+
+    public enum Status {
+        ACTIVE,
+        USER_WITHDREW,
+        OFFER,
+        REJECTED;
     }
 }

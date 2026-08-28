@@ -10,6 +10,7 @@ import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.web.servlet.MockMvc;
 import tools.jackson.databind.ObjectMapper;
 
+import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -90,7 +91,9 @@ public class ApplicantControllerTest {
                 .andExpect(jsonPath("$.pipeline.stages.length()").value(1))
                 .andExpect(jsonPath("$.pipeline.stages[0]").value("APPLIED"))
                 .andExpect(jsonPath("$.pipeline.currentStagePosition").value(0))
-                .andExpect(jsonPath("$.pipeline.level").value("Senior"));
+                .andExpect(jsonPath("$.pipeline.level").value("Senior"))
+                .andExpect(jsonPath("$.pipeline.jobId").value(jobId))
+                .andExpect(jsonPath("$.pipeline.status").value("ACTIVE"));
 
         mockMvc.perform(get("/api/users/bruh2000/applied"))
                 .andExpect(status().isOk())
@@ -147,7 +150,7 @@ public class ApplicantControllerTest {
         mockMvc.perform(put("/api/users/bruh2000/applied/%s/updateStages".formatted(jobId))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"stages": ["APPLIED", "TECHNICAL_ROUND", "TECHNICAL_ROUND", "OFFER"],
+                                {"stages": ["APPLIED", "TECHNICAL_ROUND", "TECHNICAL_ROUND", "ONSITE"],
                                  "currentStagePosition": 2}"""))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.pipeline.stages.length()").value(4))
@@ -162,7 +165,7 @@ public class ApplicantControllerTest {
         mockMvc.perform(put("/api/users/bruh2000/applied/%s/updateStages".formatted(jobId))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"stages": ["ONSITE", "OFFER"], "currentStagePosition": 0}"""))
+                                {"stages": ["ONSITE", "TECHNICAL_ROUND"], "currentStagePosition": 0}"""))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("First stage must be [APPLIED]. Actual: [ONSITE]"));
 
@@ -178,7 +181,7 @@ public class ApplicantControllerTest {
         mockMvc.perform(put("/api/users/bruh2000/applied/%s/updateStages".formatted(jobId))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"stages": ["APPLIED", "OFFER"], "currentStagePosition": 5}"""))
+                                {"stages": ["APPLIED", "ONSITE"], "currentStagePosition": 5}"""))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Invalid position [5] - max [1]"));
     }
@@ -186,7 +189,7 @@ public class ApplicantControllerTest {
     @Test
     public void testMoveToStage() throws Exception {
         apply("bruh2000", jobId);
-        setStages("APPLIED", "TECHNICAL_ROUND", "OFFER");
+        setStages("APPLIED", "TECHNICAL_ROUND", "ONSITE");
 
         mockMvc.perform(put("/api/users/bruh2000/applied/%s/moveToStage".formatted(jobId))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -200,7 +203,7 @@ public class ApplicantControllerTest {
     @Test
     public void testMoveToStagePastTheList() throws Exception {
         apply("bruh2000", jobId);
-        setStages("APPLIED", "TECHNICAL_ROUND", "OFFER");
+        setStages("APPLIED", "TECHNICAL_ROUND", "ONSITE");
 
         mockMvc.perform(put("/api/users/bruh2000/applied/%s/moveToStage".formatted(jobId))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -213,7 +216,7 @@ public class ApplicantControllerTest {
     @Test
     public void testMoveToNextStage() throws Exception {
         apply("bruh2000", jobId);
-        setStages("APPLIED", "TECHNICAL_ROUND", "OFFER");
+        setStages("APPLIED", "TECHNICAL_ROUND", "ONSITE");
 
         mockMvc.perform(post("/api/users/bruh2000/applied/%s/moveToNextStage".formatted(jobId)))
                 .andExpect(status().isOk())
@@ -252,6 +255,99 @@ public class ApplicantControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message")
                         .value("User [bruh2000] has not applied to any jobs - can't move to next stage"));
+    }
+
+    // the whole point of splitting Stage from Status: an outcome is recorded alongside the
+    // stage list, never by truncating or appending to it. the stages and the position coming
+    // back unchanged is the assertion that keeps that true
+    @Test
+    public void testUpdateStatusRecordsAnOutcomeWithoutTouchingStages() throws Exception {
+        apply("bruh2000", jobId);
+        mockMvc.perform(put("/api/users/bruh2000/applied/%s/updateStages".formatted(jobId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"stages": ["APPLIED", "TECHNICAL_ROUND", "ONSITE"],
+                                 "currentStagePosition": 1}"""))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(put("/api/users/bruh2000/applied/%s/updateStatus".formatted(jobId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"newStatus": "REJECTED"}"""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.pipeline.status").value("REJECTED"))
+                .andExpect(jsonPath("$.pipeline.stages.length()").value(3))
+                .andExpect(jsonPath("$.pipeline.stages[1]").value("TECHNICAL_ROUND"))
+                .andExpect(jsonPath("$.pipeline.currentStagePosition").value(1));
+
+        mockMvc.perform(get("/api/users/bruh2000/applied"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].pipeline.status").value("REJECTED"))
+                .andExpect(jsonPath("$[0].pipeline.stages.length()").value(3))
+                .andExpect(jsonPath("$[0].pipeline.currentStagePosition").value(1));
+    }
+
+    // reopening is just another status change, so it costs nothing and restores nothing -
+    // there was never any stage data to put back
+    @Test
+    public void testUpdateStatusReopens() throws Exception {
+        apply("bruh2000", jobId);
+        setStatus("USER_WITHDREW");
+        setStatus("OFFER");
+
+        mockMvc.perform(put("/api/users/bruh2000/applied/%s/updateStatus".formatted(jobId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"newStatus": "ACTIVE"}"""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.pipeline.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.pipeline.stages.length()").value(1))
+                .andExpect(jsonPath("$.pipeline.stages[0]").value("APPLIED"));
+    }
+
+    @Test
+    public void testUpdateStatusForUnknownUser() throws Exception {
+        mockMvc.perform(put("/api/users/nobody/applied/%s/updateStatus".formatted(jobId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"newStatus": "REJECTED"}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("No user found with id nobody"));
+    }
+
+    @Test
+    public void testUpdateStatusForUnknownJob() throws Exception {
+        apply("bruh2000", jobId);
+
+        mockMvc.perform(put("/api/users/bruh2000/applied/%s/updateStatus".formatted("x".repeat(64)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"newStatus": "REJECTED"}"""))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Job [%s] does not exist".formatted("x".repeat(64))));
+    }
+
+    // the user exists and has applications, just not to this job
+    @Test
+    public void testUpdateStatusOnAJobTheUserNeverAppliedTo() throws Exception {
+        apply("bruh2000", jobId);
+        String other = createJob("pm", "bumco", PM);
+
+        mockMvc.perform(put("/api/users/bruh2000/applied/%s/updateStatus".formatted(other))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"newStatus": "REJECTED"}"""))
+                .andExpect(status().isBadRequest())
+                // the message interpolates Job's record toString, which is not worth pinning
+                .andExpect(jsonPath("$.message", startsWith("User [bruh2000] has not applied to job")));
+    }
+
+    private void setStatus(String status) throws Exception {
+        mockMvc.perform(put("/api/users/bruh2000/applied/%s/updateStatus".formatted(jobId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"newStatus": "%s"}""".formatted(status)))
+                .andExpect(status().isOk());
     }
 
     private void setStages(String... stages) throws Exception {

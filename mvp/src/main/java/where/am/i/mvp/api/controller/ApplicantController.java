@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import where.am.i.mvp.api.request.UpdateStatusRequest;
 import where.am.i.mvp.api.response.ApplicationResponse;
 import where.am.i.mvp.api.request.ApplyRequest;
 import where.am.i.mvp.api.request.MoveToStageRequest;
@@ -66,6 +67,16 @@ public class ApplicantController {
         User user = userRegistry.getUser(userId);
         Job job = jobRegistry.getJob(jobId);
         applicantService.updateStages(user, job, request.stages(), request.currentStagePosition());
+        return ApplicationResponse.from(job, applicantService.getPipeline(user, job));
+    }
+
+    @PutMapping("/applied/{jobId}/updateStatus")
+    public ApplicationResponse updateStatus(@PathVariable String userId,
+                                            @PathVariable String jobId,
+                                            @RequestBody UpdateStatusRequest request) throws IOException {
+        User user = userRegistry.getUser(userId);
+        Job job = jobRegistry.getJob(jobId);
+        applicantService.updateStatus(user, job, request.newStatus());
         return ApplicationResponse.from(job, applicantService.getPipeline(user, job));
     }
 
