@@ -495,6 +495,13 @@ main:has(.role-view) {
   font-weight: 600;
 }
 
+/* clicking a line filters the roster the way clicking a node does, so it has to look clickable.
+   the colour change on hover is driven from JS rather than here, because a hovered line also has
+   to be raised above the ones it crosses and SVG has no z-index */
+.graph .react-flow__edge {
+  cursor: pointer;
+}
+
 /* React Flow ships its own node chrome; these are our own nodes, so they take the app's
    surface, border and accent rather than the library's defaults */
 .graph-node {

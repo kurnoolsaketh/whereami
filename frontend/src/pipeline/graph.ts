@@ -47,6 +47,9 @@ export interface GraphEdge {
 // the columns is exactly how they drift apart
 export type EdgeRoute = 'chain' | 'hop' | 'loop'
 
+// what the role view is filtered to: a node's badge, or a line's count
+export type Selection = { kind: 'node' | 'edge'; id: string }
+
 export interface Graph {
   nodes: GraphNode[]
   edges: GraphEdge[]
@@ -89,17 +92,21 @@ export function buildGraph(
   // `drawn` is what the graph actually shows: only transitions somebody has *made*. an edge is a
   // record of a move, so an applicant sitting at Applied with five rounds ahead is on none of them
   const announced = new Map<string, Edge>()
-  const drawn = new Map<string, Edge>()
   for (const pipeline of pipelines) {
     const labelled = labelStages(pipeline.stages)
-    const here = standingAt(pipeline, labelled.length)
     for (let i = 0; i + 1 < labelled.length; i += 1) {
-      const source = nodeKey(labelled[i].stage, labelled[i].occurrence)
-      const target = nodeKey(labelled[i + 1].stage, labelled[i + 1].occurrence)
-      bump(announced, source, target)
-      if (i < here) {
-        bump(drawn, source, target)
-      }
+      bump(
+        announced,
+        nodeKey(labelled[i].stage, labelled[i].occurrence),
+        nodeKey(labelled[i + 1].stage, labelled[i + 1].occurrence),
+      )
+    }
+  }
+
+  const drawn = new Map<string, Edge>()
+  for (const pipeline of pipelines) {
+    for (const move of movesOf(pipeline)) {
+      bump(drawn, move.source, move.target)
     }
   }
 
@@ -137,12 +144,6 @@ export function buildGraph(
   for (const pipeline of pipelines) {
     if (!isActive(pipeline)) {
       held.add(pipeline.status)
-    }
-  }
-  for (const pipeline of pipelines) {
-    if (!isActive(pipeline)) {
-      // ending somewhere IS a move out of it, so an outcome edge is drawn like any other
-      bump(drawn, stageKey(pipeline), pipeline.status)
     }
   }
 
@@ -264,8 +265,38 @@ function standingAt(pipeline: Pipeline, length: number): number {
   return Math.max(0, Math.min(pipeline.currentStagePosition, length - 1))
 }
 
+// every move one applicant has made: each round they walked out of, and - if their application
+// ended - the outcome they left their last round for. counting these is what builds the edges,
+// and edgeHolds asks the same question of one pipeline, so a filtered roster cannot disagree
+// with the number on the line the way two separate rules eventually would
+function movesOf(pipeline: Pipeline): { source: string; target: string }[] {
+  const labelled = labelStages(pipeline.stages)
+  const here = standingAt(pipeline, labelled.length)
+  const moves = labelled.slice(0, here).map((at, i) => ({
+    source: nodeKey(at.stage, at.occurrence),
+    target: nodeKey(labelled[i + 1].stage, labelled[i + 1].occurrence),
+  }))
+
+  return isActive(pipeline)
+    ? moves
+    : [...moves, { source: stageKey(pipeline), target: pipeline.status }]
+}
+
+// the id format for an edge, defined once so bump and edgeHolds cannot format it differently -
+// the same reason nodeKey exists for nodes
+function edgeId(source: string, target: string): string {
+  return `${source}->${target}`
+}
+
+// which applicants a line is counting. clicking an edge filters the roster through this, so the
+// filtered list always has exactly as many rows as the label claims - the same rule the weights
+// are counted by, written once
+export function edgeHolds(pipeline: Pipeline, edge: GraphEdge): boolean {
+  return movesOf(pipeline).some((move) => edgeId(move.source, move.target) === edge.id)
+}
+
 function bump(edges: Map<string, Edge>, source: string, target: string): void {
-  const id = `${source}->${target}`
+  const id = edgeId(source, target)
   const existing = edges.get(id)
   if (existing === undefined) {
     edges.set(id, { id, source, target, weight: 1, backEdge: false })

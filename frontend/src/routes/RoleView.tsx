@@ -9,9 +9,9 @@ import {
   listStages,
   listStatuses,
 } from '../api/client'
-import type { Applicant, Job, Level } from '../api/types'
+import type { Applicant, Job, Level, Pipeline } from '../api/types'
 import { useLoad } from '../api/useLoad'
-import { buildGraph, nodeHolds } from '../pipeline/graph'
+import { buildGraph, edgeHolds, nodeHolds, type Selection } from '../pipeline/graph'
 import { PipelineGraph } from '../pipeline/PipelineGraph'
 import { currentStageLabel, stageKey } from '../pipeline/stages'
 import { isActive, statusLabel } from '../pipeline/status'
@@ -49,8 +49,8 @@ export function RoleView() {
 
   const [applying, setApplying] = useState<string | null>(null)
   const [applyError, setApplyError] = useState<string | null>(null)
-  // the id of the graph node the roster is filtered to, or null for everyone
-  const [selected, setSelected] = useState<string | null>(null)
+  // the graph node or edge the roster is filtered to, or null for everyone
+  const [selected, setSelected] = useState<Selection | null>(null)
 
   const graph = useMemo(
     () =>
@@ -77,13 +77,33 @@ export function RoleView() {
     }
   }
 
-  const selectedNode = graph?.nodes.find((node) => node.id === selected) ?? null
+  const labels = new Map((graph?.nodes ?? []).map((node) => [node.id, node.label]))
+  const pickedNode =
+    selected?.kind === 'node' ? (graph?.nodes.find((node) => node.id === selected.id) ?? null) : null
+  const pickedEdge =
+    selected?.kind === 'edge' ? (graph?.edges.find((edge) => edge.id === selected.id) ?? null) : null
+
+  // whichever is picked, the rule that filters the roster is the one that produced the number on
+  // it, so the list always has exactly as many rows as the badge or the label claims
+  const holds = (pipeline: Pipeline): boolean =>
+    pickedNode !== null
+      ? nodeHolds(pipeline, pickedNode)
+      : pickedEdge !== null && edgeHolds(pipeline, pickedEdge)
+
   // the filtered panel is the same roster with a filtered array - not a second component, or
   // the two lists would drift and the filtered one would quietly lose its profile links
   const shown =
-    data === null || selectedNode === null
+    data === null || selected === null
       ? (data?.applicants ?? [])
-      : data.applicants.filter((applicant) => nodeHolds(applicant.pipeline, selectedNode))
+      : data.applicants.filter((applicant) => holds(applicant.pipeline))
+
+  // a line is named by the rounds it joins, taken from the graph's own node labels so a heading
+  // and the nodes it names always read the same words
+  const pickedLabel =
+    pickedNode?.label ??
+    (pickedEdge === null
+      ? null
+      : `${labels.get(pickedEdge.source) ?? pickedEdge.source} → ${labels.get(pickedEdge.target) ?? pickedEdge.target}`)
 
   return (
     <section className="role-view">
@@ -134,7 +154,8 @@ export function RoleView() {
                 with how many went that way and what share of everyone who reached that round they
                 are, and is drawn thicker the larger that share. So a line that loops back is a
                 round this role really repeats, drawn like any other. A round nobody has reached
-                yet has no lines leaving it. Click a node to see who is on it.
+                yet has no lines leaving it. Point at a line to pick it out of the others, and
+                click a node or a line to see who is on it.
               </p>
               <PipelineGraph
                 nodes={graph.nodes}
@@ -147,8 +168,8 @@ export function RoleView() {
 
           <div className="card">
             <div className="section-header">
-              <h3>{selectedNode === null ? 'Where everyone is' : selectedNode.label}</h3>
-              {selectedNode !== null && (
+              <h3>{pickedLabel ?? 'Where everyone is'}</h3>
+              {selected !== null && (
                 <button type="button" className="secondary" onClick={() => setSelected(null)}>
                   Show all ({data.applicants.length})
                 </button>
@@ -157,12 +178,14 @@ export function RoleView() {
             <Roster
               applicants={shown}
               jobsById={new Map(data.jobs.map((job) => [job.jobId, job]))}
-              labels={new Map((graph?.nodes ?? []).map((node) => [node.id, node.label]))}
+              labels={labels}
               youId={userId}
               empty={
-                selectedNode === null
+                selected === null
                   ? 'No one has recorded an application to this role yet.'
-                  : 'Nobody is at this node.'
+                  : selected.kind === 'node'
+                    ? 'Nobody is at this round.'
+                    : 'Nobody has made this move.'
               }
             />
           </div>

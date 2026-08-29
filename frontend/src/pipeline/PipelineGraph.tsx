@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Background,
   BaseEdge,
@@ -17,7 +17,13 @@ import {
   type NodeProps,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { edgeLabel, sharePercent, type GraphEdge, type GraphNode } from './graph'
+import {
+  edgeLabel,
+  sharePercent,
+  type GraphEdge,
+  type GraphNode,
+  type Selection,
+} from './graph'
 
 // graph.ts already assigned every node a column and a row, so there is no layout engine here -
 // React Flow is only asked to draw. the spacing is generous because React Flow routes an edge
@@ -28,6 +34,12 @@ const COLUMN_WIDTH = 220
 // one colour for the line and its arrowhead. the line takes it from the stylesheet and the
 // marker has to be told, because an SVG marker is filled by attribute, so both name the same var
 const EDGE_COLOUR = 'var(--edge)'
+
+// the colour a line takes when it is pointed at or picked. the app's accent, not a new colour of
+// its own: it already rings a selected node and badges every count, so it reads as "this one"
+// rather than as a warning - which is what red would say here, and what red still says everywhere
+// else in the app
+const EDGE_PICKED_COLOUR = 'var(--accent)'
 
 // a thin line always means few people and a thick one always means many, on the same scale
 // whatever role you are looking at: 0% is 1px and 100% is 6px, never rescaled to fit
@@ -136,6 +148,9 @@ interface EdgeData extends Record<string, unknown> {
   // would pile up in the middle of the graph; sliding them apart by lane keeps each one over its
   // own line and clear of the next. undefined leaves the label at the path's own midpoint
   labelAt: number | undefined
+  // pointed at or picked. one flag, because both mean the same thing to a reader - this is the
+  // line you are asking about - and only their persistence differs
+  lit: boolean
 }
 
 interface NodeData extends Record<string, unknown> {
@@ -148,8 +163,8 @@ interface NodeData extends Record<string, unknown> {
 interface PipelineGraphProps {
   nodes: GraphNode[]
   edges: GraphEdge[]
-  selected: string | null
-  onSelect: (id: string | null) => void
+  selected: Selection | null
+  onSelect: (selection: Selection | null) => void
 }
 
 // the provider is here only so FitOnMeasure can reach the instance; everything else is inside
@@ -203,8 +218,10 @@ function Flow({ nodes, edges, selected, onSelect }: PipelineGraphProps) {
         data: {
           label: node.label,
           count: node.count,
-          dimmed: selected !== null && selected !== node.id,
-          picked: selected === node.id,
+          // only a node selection dims the others; picking a line lights the line and leaves the
+          // rounds alone, since every round it touches is still part of what you are looking at
+          dimmed: selected?.kind === 'node' && selected.id !== node.id,
+          picked: selected?.kind === 'node' && selected.id === node.id,
         },
         draggable: false,
         connectable: false,
@@ -212,10 +229,16 @@ function Flow({ nodes, edges, selected, onSelect }: PipelineGraphProps) {
     [nodes, selected, bands.rowPitch],
   )
 
+  // which line the pointer is on. this is React state rather than a CSS :hover rule because a lit
+  // line also has to come to the front, and SVG has no z-index - the only way to raise one is to
+  // give it a higher zIndex and let React Flow reorder it
+  const [hovered, setHovered] = useState<string | null>(null)
+
   const flowEdges = useMemo<Edge[]>(() => {
     return edges.map((edge) => {
         const route = edge.route
         const strokeWidth = MIN_WIDTH + (MAX_WIDTH - MIN_WIDTH) * edge.share
+        const lit = hovered === edge.id || (selected?.kind === 'edge' && selected.id === edge.id)
 
 
         return {
@@ -230,12 +253,15 @@ function Flow({ nodes, edges, selected, onSelect }: PipelineGraphProps) {
               route === 'chain' ? undefined : laneOffset(route, edge.lane),
             lift: route === 'chain' ? -CHAIN_LABEL_LIFT : ARC_LABEL_LIFT,
             labelAt: route === 'chain' ? undefined : LABEL_STOPS[edge.lane % LABEL_STOPS.length],
+            lit,
           } satisfies EdgeData,
-          style: { strokeWidth },
+          style: { strokeWidth, ...(lit ? { stroke: EDGE_PICKED_COLOUR } : {}) },
+          // above every other line, so a lit one is never left under an arc that crosses it
+          zIndex: lit ? 1 : 0,
           ariaLabel: `${edge.weight} of the applicants on this role, ${sharePercent(edge)} percent, have this step in their pipeline`,
         }
     })
-  }, [edges])
+  }, [edges, hovered, selected])
 
   return (
     <div className="graph">
@@ -249,7 +275,22 @@ function Flow({ nodes, edges, selected, onSelect }: PipelineGraphProps) {
         edgesFocusable={false}
         fitView
         proOptions={{ hideAttribution: false }}
-        onNodeClick={(_event, node) => onSelect(selected === node.id ? null : node.id)}
+        onNodeClick={(_event, node) =>
+          onSelect(
+            selected?.kind === 'node' && selected.id === node.id
+              ? null
+              : { kind: 'node', id: node.id },
+          )
+        }
+        onEdgeClick={(_event, edge) =>
+          onSelect(
+            selected?.kind === 'edge' && selected.id === edge.id
+              ? null
+              : { kind: 'edge', id: edge.id },
+          )
+        }
+        onEdgeMouseEnter={(_event, edge) => setHovered(edge.id)}
+        onEdgeMouseLeave={() => setHovered(null)}
         onPaneClick={() => onSelect(null)}
       >
         <FitOnMeasure shape={nodes.map((node) => node.id).join()} />
@@ -376,7 +417,7 @@ function PipelineEdge({
   return (
     <>
       <BaseEdge path={path} style={style} />
-      <polygon points={head} fill={EDGE_COLOUR} />
+      <polygon points={head} fill={data?.lit ? EDGE_PICKED_COLOUR : EDGE_COLOUR} />
       <EdgeText
         x={x}
         y={labelY + (data?.lift ?? 0)}
@@ -384,6 +425,14 @@ function PipelineEdge({
         labelShowBg
         labelBgPadding={[6, 3]}
         labelBgBorderRadius={4}
+        {...(data?.lit
+          ? {
+              // the chip recolours with its line, which is what says the two belong together -
+              // worth having where several arcs run close and a label could belong to any of them
+              labelStyle: { fill: EDGE_PICKED_COLOUR },
+              labelBgStyle: { stroke: EDGE_PICKED_COLOUR },
+            }
+          : {})}
       />
     </>
   )

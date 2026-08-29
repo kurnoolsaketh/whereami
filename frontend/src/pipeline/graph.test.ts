@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import type { Pipeline, Stage, Status } from '../api/types'
-import { buildGraph, edgeLabel, nodeHolds } from './graph'
+import { buildGraph, edgeHolds, edgeLabel, nodeHolds } from './graph'
 import { labelStages, nodeKey } from './stages'
 
 const STAGES: Stage[] = [
@@ -510,6 +510,48 @@ it('nodeHolds selects exactly the pipelines a badge is counting', () => {
       `node ${node.id}`,
     ).toHaveLength(node.count)
   }
+})
+
+// edgeHolds is what the roster filters by when a line is clicked, so like nodeHolds it has to
+// agree with the number on that line exactly
+it('edgeHolds selects exactly the applicants a line is counting', () => {
+  const pipelines = [
+    pipeline([A, T, T, O], 2),
+    pipeline([A, T, O], 1),
+    pipeline([A, T, T, T, O], 3, 'REJECTED'),
+    pipeline([A, R, O], 1, 'OFFER'),
+    pipeline([A], 0),
+    pipeline([A, T, O], 2, 'USER_WITHDREW'),
+  ]
+  const g = graph(pipelines)
+
+  expect(g.edges.length).toBeGreaterThan(0)
+  for (const edge of g.edges) {
+    expect(
+      pipelines.filter((candidate) => edgeHolds(candidate, edge)),
+      `edge ${edge.id}`,
+    ).toHaveLength(edge.weight)
+  }
+})
+
+it('edgeHolds keeps out an applicant who was told about the step but has not taken it', () => {
+  // both were told about an onsite after the technical round; only the second has walked it
+  const waiting = pipeline([A, T, O], 1)
+  const walked = pipeline([A, T, O], 2)
+  const g = graph([waiting, walked])
+
+  const step = edgeBetween(g, 'TECHNICAL_ROUND#1', 'ONSITE#1')
+  expect(edgeHolds(walked, step)).toBe(true)
+  expect(edgeHolds(waiting, step)).toBe(false)
+  expect(step.weight).toBe(1)
+})
+
+it('edgeHolds puts a terminated applicant on its outcome edge, not on the step ahead', () => {
+  const stopped = pipeline([A, T, O], 1, 'REJECTED')
+  const g = graph([pipeline([A, T, O], 2), stopped])
+
+  expect(edgeHolds(stopped, edgeBetween(g, 'TECHNICAL_ROUND#1', 'REJECTED'))).toBe(true)
+  expect(edgeHolds(stopped, edgeBetween(g, 'TECHNICAL_ROUND#1', 'ONSITE#1'))).toBe(false)
 })
 
 it('nodeHolds keeps a terminated pipeline off the stage it stopped at', () => {

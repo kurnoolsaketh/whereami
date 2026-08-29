@@ -65,7 +65,10 @@ The graph merges every stage ordering anyone recorded for that role into one pic
   different node from their first. A stage is numbered only if the role spans more than one
   of it — which means your own plain "Technical Round" can appear here as "Technical Round 1".
 - A node's **badge** counts the people standing there now. Clicking a node filters the list
-  below to exactly those people.
+  below to exactly those people, and clicking a **line** does the same for the applicants who
+  made that move — the filtered list always has exactly as many rows as the badge or label
+  claims. Pointing at a line lifts it above the ones it crosses and colours it, which is how you
+  tell which label belongs to which line where several run close together.
 - An edge is a **move somebody made**, not a round they were told about: an applicant sitting at
   Applied with five rounds ahead is on none of the lines yet. Its **label** is how many
   applicants made that move and what share of everyone who *reached that node* they are, and its
