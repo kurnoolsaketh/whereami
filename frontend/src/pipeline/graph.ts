@@ -26,9 +26,11 @@ export interface GraphEdge {
   id: string
   source: string
   target: string
-  // how many applicants have this transition in their pipeline
+  // how many applicants have made this move: walked from the source to the target, or ended at
+  // the source with this outcome. an applicant who was told about the step but has not got there
+  // yet is not counted - an edge records what happened, not what was announced
   weight: number
-  // weight over every pipeline on the role, 0..1
+  // weight over the applicants who reached the source node, 0..1
   share: number
   // layout metadata, not a verdict. ranking needs a DAG, so one edge of every cycle is left out
   // of it and this says which - the renderer draws it as a loop rather than along the chain. it
@@ -77,14 +79,38 @@ export function buildGraph(
     }
   }
 
-  // 2. stage edges, deduped by source->target with the weight counted
-  const edges = new Map<string, Edge>()
+  // 2. two edge sets, because layout and display want different things.
+  //
+  // `announced` is every consecutive pair anyone was told about, walked or not. it exists only to
+  // rank the columns: a round nobody has reached yet still belongs to the right of the one before
+  // it, and ranking on it is what keeps the layout still while applicants advance rather than
+  // reshuffling under them.
+  //
+  // `drawn` is what the graph actually shows: only transitions somebody has *made*. an edge is a
+  // record of a move, so an applicant sitting at Applied with five rounds ahead is on none of them
+  const announced = new Map<string, Edge>()
+  const drawn = new Map<string, Edge>()
   for (const pipeline of pipelines) {
     const labelled = labelStages(pipeline.stages)
+    const here = standingAt(pipeline, labelled.length)
     for (let i = 0; i + 1 < labelled.length; i += 1) {
       const source = nodeKey(labelled[i].stage, labelled[i].occurrence)
       const target = nodeKey(labelled[i + 1].stage, labelled[i + 1].occurrence)
-      bump(edges, source, target)
+      bump(announced, source, target)
+      if (i < here) {
+        bump(drawn, source, target)
+      }
+    }
+  }
+
+  // how many applicants ever stood on each node, which is the denominator every edge leaving it
+  // is measured against. reaching a node means having walked to it, not having been told about it
+  const reached = new Map<string, number>()
+  for (const pipeline of pipelines) {
+    const labelled = labelStages(pipeline.stages)
+    for (let i = 0; i <= standingAt(pipeline, labelled.length); i += 1) {
+      const id = nodeKey(labelled[i].stage, labelled[i].occurrence)
+      reached.set(id, (reached.get(id) ?? 0) + 1)
     }
   }
 
@@ -98,8 +124,10 @@ export function buildGraph(
   const stageNodeLabel = (stage: Stage, occurrence: number): string =>
     occurrences.get(stage) === 1 ? enumLabel(stage) : `${enumLabel(stage)} ${occurrence}`
 
-  // 4. columns for stage nodes: the longest path from the root, with cycles broken first
-  const columns = rankStages([...stageNodes.keys()], edges, order, stageNodes)
+  // 4. columns for stage nodes: the longest path from the root, with cycles broken first. over
+  // the announced edges, so the shape of the role decides the layout rather than how far along it
+  // people happen to be today
+  const columns = rankStages([...stageNodes.keys()], announced, order, stageNodes)
   const maxStageColumn = Math.max(-1, ...columns.values())
 
   // 5. outcome nodes, synthesized only now. ranking first is what makes "always last" true:
@@ -113,7 +141,8 @@ export function buildGraph(
   }
   for (const pipeline of pipelines) {
     if (!isActive(pipeline)) {
-      bump(edges, stageKey(pipeline), pipeline.status)
+      // ending somewhere IS a move out of it, so an outcome edge is drawn like any other
+      bump(drawn, stageKey(pipeline), pipeline.status)
     }
   }
 
@@ -166,34 +195,41 @@ export function buildGraph(
     })
   }
 
-  // 8. routes and lanes, which need every node's column and every edge at once
+  // 8. routes and lanes, which need every node's column and every edge at once.
+  //
+  // ranking marked its cycle-breaks on the announced edges, so carry that across to the drawn
+  // ones by id: a drawn edge is always one of the announced pairs, and the two must agree or an
+  // edge would be routed along the chain it actually runs backwards against
+  for (const edge of drawn.values()) {
+    edge.backEdge = announced.get(edge.id)?.backEdge ?? false
+  }
+
   const columnOf = new Map<string, number>(nodes.map((node) => [node.id, node.column]))
   const routeOf = new Map<string, EdgeRoute>()
-  for (const edge of edges.values()) {
+  for (const edge of drawn.values()) {
     const reach = (columnOf.get(edge.target) ?? 0) - (columnOf.get(edge.source) ?? 0)
     routeOf.set(edge.id, edge.backEdge ? 'loop' : reach > 1 ? 'hop' : 'chain')
   }
-  const laneOf = packLanes([...edges.values()], routeOf, columnOf)
+  const laneOf = packLanes([...drawn.values()], routeOf, columnOf)
 
-  // 9. shares, computed last so stage edges and outcome edges are on one denominator: every
-  // pipeline on the role. a width therefore means the same thing wherever it appears.
+  // 9. shares. an edge is measured against the applicants who reached the node it leaves, so it
+  // reads "of the people who got this far, this fraction went that way" rather than "this
+  // fraction of everybody".
   //
-  // these do NOT sum to 1 across a node's outgoing edges, and are not meant to. three reasons,
-  // all structural: a node below a fork is not in every pipeline, so the applicants who never
-  // reached it cannot appear on any edge leaving it; a node people stop at has no outgoing edges
-  // at all, and [APPLIED] on its own is a legal - and the initial - pipeline; and an outcome edge
-  // overlaps the stage edge beside it, because a rejected applicant truthfully both announced a
-  // round after this one and ended here, so a sum can even exceed 1. the conservation law this
-  // app relies on is on the nodes instead: badges sum to pipelines.length with each pipeline
-  // counted exactly once, which is what lets nodeHolds filter the roster to exactly the badge
-  const share = (weight: number): number =>
-    pipelines.length === 0 ? 0 : weight / pipelines.length
+  // that makes the outgoing edges of a node a real partition, which the global denominator never
+  // was: every applicant who reached a node either moved on (one walked edge), ended there (one
+  // outcome edge), or is standing on it now (the badge, and no edge). so for every node,
+  // sum of outgoing weights + badge = reached. graph.test.ts asserts exactly that
+  const share = (weight: number, source: string): number => {
+    const total = reached.get(source) ?? 0
+    return total === 0 ? 0 : weight / total
+  }
 
   return {
     nodes: nodes.map(({ sortKey: _sortKey, ...node }) => node),
-    edges: [...edges.values()].map((edge) => ({
+    edges: [...drawn.values()].map((edge) => ({
       ...edge,
-      share: share(edge.weight),
+      share: share(edge.weight, edge.source),
       route: routeOf.get(edge.id) ?? 'chain',
       lane: laneOf.get(edge.id) ?? 0,
     })),
@@ -220,6 +256,12 @@ export function nodeHolds(pipeline: Pipeline, node: GraphNode): boolean {
   return node.kind === 'outcome'
     ? !isActive(pipeline) && pipeline.status === node.id
     : isActive(pipeline) && stageKey(pipeline) === node.id
+}
+
+// the index a pipeline is standing on, clamped to its own stage list. the API validates the
+// position against the list it is saved with, so this is defensive only
+function standingAt(pipeline: Pipeline, length: number): number {
+  return Math.max(0, Math.min(pipeline.currentStagePosition, length - 1))
 }
 
 function bump(edges: Map<string, Edge>, source: string, target: string): void {

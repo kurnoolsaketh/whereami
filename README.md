@@ -66,11 +66,12 @@ The graph merges every stage ordering anyone recorded for that role into one pic
   of it — which means your own plain "Technical Round" can appear here as "Technical Round 1".
 - A node's **badge** counts the people standing there now. Clicking a node filters the list
   below to exactly those people.
-- An edge's **label** is how many applicants have that transition in their pipeline and what
-  share of the role that is, and its **thickness** tracks that share on a fixed scale, so a
-  thin line always means few people. The shares do not add up to 100% at a node and are not
-  meant to — the graph's conservation law is on the badges, which count every applicant
-  exactly once.
+- An edge is a **move somebody made**, not a round they were told about: an applicant sitting at
+  Applied with five rounds ahead is on none of the lines yet. Its **label** is how many
+  applicants made that move and what share of everyone who *reached that node* they are, and its
+  **thickness** tracks that share. So the edges leaving a node account for exactly the people who
+  got there: each of them either moved on, ended there, or is standing on it and counted in the
+  badge.
 - The graph is **directed and may contain cycles**: a role that sends someone back for another
   round after a technical one is a real shape, not a mistake by whoever recorded it. Laying the
   columns out still needs an acyclic graph, so one edge of each cycle is held out of the

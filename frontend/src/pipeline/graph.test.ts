@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest'
 import type { Pipeline, Stage, Status } from '../api/types'
 import { buildGraph, edgeLabel, nodeHolds } from './graph'
+import { labelStages, nodeKey } from './stages'
 
 const STAGES: Stage[] = [
   'APPLIED',
@@ -42,6 +43,8 @@ function edgeBetween(g: ReturnType<typeof graph>, source: string, target: string
 // Ann: Applied -> Tech -> Tech -> Onsite   (at her second technical round)
 // Bob: Applied -> Tech -> Onsite           (at his first)
 // Cat: Applied -> Tech -> Tech -> Tech -> Onsite (at her third)
+// none of them has reached an onsite, so no edge into Onsite exists yet - an edge is a move
+// somebody made, and being told about a round is not making it
 const WORKED_EXAMPLE = [
   pipeline([A, T, T, O], 2),
   pipeline([A, T, O], 1),
@@ -96,12 +99,22 @@ it('alternatives share a column, so a fork reads as a fork', () => {
   expect(nodeAt(g, 'RECRUITER_SCREEN#1').row).toBeLessThan(nodeAt(g, 'TECHNICAL_ROUND#1').row)
 })
 
-it('edge weights count the pipelines that recorded each transition', () => {
+it('edge weights count the applicants who made each move', () => {
   const g = graph(WORKED_EXAMPLE)
 
   expect(edgeBetween(g, 'APPLIED#1', 'TECHNICAL_ROUND#1').weight).toBe(3)
   expect(edgeBetween(g, 'TECHNICAL_ROUND#1', 'TECHNICAL_ROUND#2').weight).toBe(2)
-  expect(edgeBetween(g, 'TECHNICAL_ROUND#1', 'ONSITE#1').weight).toBe(1)
+  expect(edgeBetween(g, 'TECHNICAL_ROUND#2', 'TECHNICAL_ROUND#3').weight).toBe(1)
+})
+
+it('a step nobody has taken yet is not an edge, though its rounds are still nodes', () => {
+  const g = graph(WORKED_EXAMPLE)
+
+  // Bob was told about an onsite after his technical round and has not got there, and neither
+  // has anyone else, so nothing is drawn into Onsite
+  expect(g.edges.some((edge) => edge.target === 'ONSITE#1')).toBe(false)
+  // the round itself is still part of the role's shape, and still laid out to the right
+  expect(nodeAt(g, 'ONSITE#1').column).toBe(4)
 })
 
 it('counts land on the node each pipeline stands at, and an empty stage node survives', () => {
@@ -116,19 +129,19 @@ it('counts land on the node each pipeline stands at, and an empty stage node sur
 })
 
 it('terminates on a cycle and breaks exactly one edge for ranking', () => {
-  const g = graph([pipeline([A, T, O], 1), pipeline([A, O, T], 1)])
+  const g = graph([pipeline([A, T, O], 2), pipeline([A, O, T], 2)])
 
   expect(g.edges.filter((edge) => edge.backEdge)).toHaveLength(1)
 })
 
 it('breaks the low-weight edge of a cycle, not whichever came first', () => {
   const consensus = [
-    pipeline([A, T, O], 1),
-    pipeline([A, T, O], 1),
-    pipeline([A, T, O], 1),
-    pipeline([A, T, O], 1),
+    pipeline([A, T, O], 2),
+    pipeline([A, T, O], 2),
+    pipeline([A, T, O], 2),
+    pipeline([A, T, O], 2),
   ]
-  const outlier = pipeline([A, O, T], 1)
+  const outlier = pipeline([A, O, T], 2)
   const g = graph([...consensus, outlier])
 
   const broken = g.edges.filter((edge) => edge.backEdge)
@@ -155,10 +168,10 @@ it('is identical however the applicants are ordered', () => {
 
 it('the cycle tie-break survives a reversed input too', () => {
   const pipelines = [
-    pipeline([A, T, O], 1),
-    pipeline([A, T, O], 1),
-    pipeline([A, T, O], 1),
-    pipeline([A, O, T], 1),
+    pipeline([A, T, O], 2),
+    pipeline([A, T, O], 2),
+    pipeline([A, T, O], 2),
+    pipeline([A, O, T], 2),
   ]
   const forwards = graph(pipelines)
   const backwards = graph([...pipelines].reverse())
@@ -290,25 +303,37 @@ it('handles no pipelines at all', () => {
   expect(g.columns).toBe(0)
 })
 
-// an edge's count is the number of applicants whose pipeline contains that transition, and its
-// share is that count over every pipeline on the role. note this does NOT conserve per node:
-// see the comment on share in graph.ts for the three reasons why, and why the conservation law
-// the app actually relies on lives on the node badges instead
-it('share puts stage edges and outcome edges on one denominator', () => {
+// how many applicants ever stood on a node - the denominator every edge leaving it is measured
+// against. computed here from the pipelines so the assertions below are checking graph.ts rather
+// than agreeing with it
+function reachedCount(pipelines: Pipeline[], id: string): number {
+  return pipelines.filter((pipeline) => {
+    const labelled = labelStages(pipeline.stages)
+    return labelled
+      .slice(0, pipeline.currentStagePosition + 1)
+      .some((at) => nodeKey(at.stage, at.occurrence) === id)
+  }).length
+}
+
+it('a share is measured against the applicants who reached the node it leaves', () => {
+  // three applied; two went on to a technical round and one to a recruiter screen. of the two at
+  // the technical round, one was rejected there
   const g = graph([
     pipeline([A, T, O], 1),
     pipeline([A, T, O], 1, 'REJECTED'),
     pipeline([A, R, O], 1),
   ])
 
+  // everybody reached Applied, so its edges are shares of all three
   expect(edgeBetween(g, 'APPLIED#1', 'TECHNICAL_ROUND#1').weight).toBe(2)
   expect(edgeBetween(g, 'APPLIED#1', 'TECHNICAL_ROUND#1').share).toBeCloseTo(2 / 3)
   expect(edgeBetween(g, 'APPLIED#1', 'RECRUITER_SCREEN#1').share).toBeCloseTo(1 / 3)
-  // the outcome edge is a third of the role, on the same scale as any stage edge
-  expect(edgeBetween(g, 'TECHNICAL_ROUND#1', 'REJECTED').share).toBeCloseTo(1 / 3)
+  // but only two reached the technical round, so being rejected there is half of them - not the
+  // third of the role it would be on a global denominator
+  expect(edgeBetween(g, 'TECHNICAL_ROUND#1', 'REJECTED').share).toBeCloseTo(1 / 2)
 })
 
-it('no edge can claim more applicants than exist', () => {
+it('every share is its weight over the applicants who reached its source', () => {
   const pipelines = [
     pipeline([A, T, T, O], 2),
     pipeline([A, T, O], 1),
@@ -320,19 +345,45 @@ it('no edge can claim more applicants than exist', () => {
 
   expect(g.edges.length).toBeGreaterThan(0)
   for (const edge of g.edges) {
-    expect(edge.share, edge.id).toBeCloseTo(edge.weight / pipelines.length)
-    expect(edge.weight, edge.id).toBeLessThanOrEqual(pipelines.length)
+    const reached = reachedCount(pipelines, edge.source)
+    expect(edge.weight, edge.id).toBeLessThanOrEqual(reached)
+    expect(edge.share, edge.id).toBeCloseTo(edge.weight / reached)
     expect(edge.share, edge.id).toBeGreaterThan(0)
     expect(edge.share, edge.id).toBeLessThanOrEqual(1)
+  }
+})
+
+// the strongest assertion about the new semantics, and the one that makes them worth having:
+// everyone who reached a node either moved on, ended there, or is standing on it. so the edges
+// leaving a node and its badge account for every applicant who ever got there, exactly once
+it('outgoing weights plus the badge account for everyone who reached a node', () => {
+  const pipelines = [
+    pipeline([A, T, T, O], 2),
+    pipeline([A, T, O], 1),
+    pipeline([A, T, T, T, O], 3, 'REJECTED'),
+    pipeline([A, R, O], 1, 'OFFER'),
+    pipeline([A], 0),
+    pipeline([A, T, O], 2, 'USER_WITHDREW'),
+  ]
+  const g = graph(pipelines)
+
+  for (const node of g.nodes.filter((candidate) => candidate.kind === 'stage')) {
+    const out = g.edges
+      .filter((edge) => edge.source === node.id)
+      .reduce((total, edge) => total + edge.weight, 0)
+    expect(out + node.count, `node ${node.id}`).toBe(reachedCount(pipelines, node.id))
   }
 })
 
 it('an edge label carries both the count and the share', () => {
   const g = graph(WORKED_EXAMPLE)
 
+  // all three reached Applied and all three moved on to a technical round
   expect(edgeLabel(edgeBetween(g, 'APPLIED#1', 'TECHNICAL_ROUND#1'))).toBe('3 \u00b7 100%')
+  // three reached the first technical round and two of them went on to a second
   expect(edgeLabel(edgeBetween(g, 'TECHNICAL_ROUND#1', 'TECHNICAL_ROUND#2'))).toBe('2 \u00b7 67%')
-  expect(edgeLabel(edgeBetween(g, 'TECHNICAL_ROUND#1', 'ONSITE#1'))).toBe('1 \u00b7 33%')
+  // two reached the second and one of them went on to a third
+  expect(edgeLabel(edgeBetween(g, 'TECHNICAL_ROUND#2', 'TECHNICAL_ROUND#3'))).toBe('1 \u00b7 50%')
 })
 
 it('a drawn edge never rounds down to nobody', () => {
@@ -388,7 +439,8 @@ it('two arcs of the SAME length that overlap get different lanes', () => {
   // both reach three columns, so keying on the reach puts them on one line even though they
   // overlap for most of it. staggered, not nested - which is what consecutive stages produce
   const g = graph([
-    pipeline([A, B, T, O], 2),
+    // walked all the way to the onsite, so Technical 1 -> Onsite is a move somebody made
+    pipeline([A, B, T, O], 3),
     pipeline([A, H, T, T, B, O], 3),
     pipeline([A, H, T, T, B, O], 3, 'REJECTED'),
   ])
@@ -412,24 +464,30 @@ it('no two overlapping arcs ever share a lane, across a spread of roles', () => 
       pipeline([A, R, T, O], 3, 'OFFER'),
       pipeline([A, R, T, O], 0, 'USER_WITHDREW'),
     ],
-    // a staircase of equal-length hops, the shape that defeats a length-keyed lane
+    // a staircase of equal-length hops, the shape that defeats a length-keyed lane. everyone is
+    // walked to the end of their own list, so every announced step is also a move made
     [
-      pipeline([A, R, O], 1),
-      pipeline([A, R, H, T, B, O], 2),
-      pipeline([A, H, O], 1),
-      pipeline([A, R, H, T, O], 2),
+      pipeline([A, R, O], 2),
+      pipeline([A, R, H, T, B, O], 5),
+      pipeline([A, H, O], 2),
+      pipeline([A, R, H, T, O], 4),
     ],
   ]
 
+  let hops = 0
   for (const pipelines of roles) {
     const g = graph(pipelines)
-    expect(g.edges.filter((edge) => edge.route === 'hop').length).toBeGreaterThan(0)
+    hops += g.edges.filter((edge) => edge.route === 'hop').length
     expect(arcsOverlapInALane(g), JSON.stringify(pipelines)).toEqual([])
   }
+
+  // not every role has an arc - a role everyone walked in the same order is all chain - but the
+  // spread has to contain some, or this asserts nothing at all
+  expect(hops).toBeGreaterThan(0)
 })
 
 it('lanes are packed from the inside out, so a lone arc hugs the chain', () => {
-  const g = graph([pipeline([A, R, T, O], 1), pipeline([A, O, R, T], 1)])
+  const g = graph([pipeline([A, R, T, O], 3), pipeline([A, O, R, T], 3)])
   const hops = g.edges.filter((edge) => edge.route === 'hop')
 
   expect(hops.length).toBeGreaterThan(0)

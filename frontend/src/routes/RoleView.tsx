@@ -130,10 +130,11 @@ export function RoleView() {
               <h3>The pipeline for this role</h3>
               <p>
                 Every ordering anyone recorded, laid over each other. A badge counts the people
-                standing there now. A line is labelled with how many applicants have that step in
-                their pipeline and what share of the role that is, and is drawn thicker the larger
-                that share — so a line that loops back is a round this role really repeats, drawn
-                like any other. Click a node to see who is on it.
+                standing there now. A line is a move people have actually made: it is labelled
+                with how many went that way and what share of everyone who reached that round they
+                are, and is drawn thicker the larger that share. So a line that loops back is a
+                round this role really repeats, drawn like any other. A round nobody has reached
+                yet has no lines leaving it. Click a node to see who is on it.
               </p>
               <PipelineGraph
                 nodes={graph.nodes}
