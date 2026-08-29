@@ -66,9 +66,19 @@ The graph merges every stage ordering anyone recorded for that role into one pic
   of it — which means your own plain "Technical Round" can appear here as "Technical Round 1".
 - A node's **badge** counts the people standing there now. Clicking a node filters the list
   below to exactly those people.
-- An edge's **thickness and label** are how many people recorded that transition. A dashed red
-  edge ran against the order everyone else recorded; it is drawn, but excluded from the
-  layout, so one outlier cannot reorder the graph.
+- An edge's **label** is how many applicants have that transition in their pipeline and what
+  share of the role that is, and its **thickness** tracks that share on a fixed scale, so a
+  thin line always means few people. The shares do not add up to 100% at a node and are not
+  meant to — the graph's conservation law is on the badges, which count every applicant
+  exactly once.
+- The graph is **directed and may contain cycles**: a role that sends someone back for another
+  round after a technical one is a real shape, not a mistake by whoever recorded it. Laying the
+  columns out still needs an acyclic graph, so one edge of each cycle is held out of the
+  ranking — chosen by weight, so one outlier cannot reorder the graph — but it is drawn like
+  every other edge, arcing under the chain so it stays visible. Arrowheads carry the direction.
+- An edge that reaches past the next column **arcs over** the nodes in between rather than
+  cutting through them, and arcs are stacked into lanes so that two which overlap are never
+  drawn on top of each other. Labels sit beside their line, not on it.
 - The **final column** holds outcomes rather than rounds. Their placement asserts nothing
   about when people fall out — the edge weights carry that. An outcome nobody holds is not
   drawn at all.

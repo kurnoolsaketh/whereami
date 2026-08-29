@@ -4,7 +4,12 @@ import { isActive, statusLabel } from './status'
 
 // the merged pipeline for one role: every stage ordering anyone recorded, laid over each other,
 // with a head count on each node. pure - no React, no network - so the interesting part is
-// testable without rendering anything
+// testable without rendering anything.
+//
+// the result is a directed graph and may well contain cycles: a role that sends someone back for
+// a second behavioral round after a technical one is a real shape, not an error by the applicant
+// who wrote it down. only the column ranking needs a DAG, and it makes its own by holding one
+// edge of each cycle aside - see backEdge
 
 export interface GraphNode {
   // a stage node's id is `${stage}#${occurrence}`, which is exactly what stageKey() returns for
@@ -21,11 +26,24 @@ export interface GraphEdge {
   id: string
   source: string
   target: string
-  // how many pipelines recorded this transition
+  // how many applicants have this transition in their pipeline
   weight: number
-  // this edge closed a cycle, so it was excluded from ranking and is drawn marked
-  outOfOrder: boolean
+  // weight over every pipeline on the role, 0..1
+  share: number
+  // layout metadata, not a verdict. ranking needs a DAG, so one edge of every cycle is left out
+  // of it and this says which - the renderer draws it as a loop rather than along the chain. it
+  // is an ordering someone really recorded, drawn exactly like any other
+  backEdge: boolean
+  // where this edge has to travel to stay visible, and which lane of its band it travels in
+  route: EdgeRoute
+  lane: number
 }
+
+// 'chain' runs to the next column and is drawn straight; 'hop' reaches past it and arcs over the
+// nodes in between; 'loop' closes a cycle and arcs under them. decided here rather than in the
+// renderer because lane packing needs it - and because two places deriving the same thing from
+// the columns is exactly how they drift apart
+export type EdgeRoute = 'chain' | 'hop' | 'loop'
 
 export interface Graph {
   nodes: GraphNode[]
@@ -38,13 +56,10 @@ interface Ranked extends GraphNode {
   sortKey: [number, number]
 }
 
-interface Edge {
-  id: string
-  source: string
-  target: string
-  weight: number
-  outOfOrder: boolean
-}
+// the three derived fields are missing here on purpose: none can be computed until every edge
+// exists, outcome edges included. share would otherwise put stage edges and outcome edges on two
+// different denominators, and a lane cannot be chosen without seeing every arc it might overlap
+type Edge = Omit<GraphEdge, 'share' | 'route' | 'lane'>
 
 // `order` is GET /api/stages and `statusOrder` is GET /api/statuses. both are only used to make
 // the layout deterministic - which node sits above which - never to decide what exists
@@ -151,11 +166,51 @@ export function buildGraph(
     })
   }
 
+  // 8. routes and lanes, which need every node's column and every edge at once
+  const columnOf = new Map<string, number>(nodes.map((node) => [node.id, node.column]))
+  const routeOf = new Map<string, EdgeRoute>()
+  for (const edge of edges.values()) {
+    const reach = (columnOf.get(edge.target) ?? 0) - (columnOf.get(edge.source) ?? 0)
+    routeOf.set(edge.id, edge.backEdge ? 'loop' : reach > 1 ? 'hop' : 'chain')
+  }
+  const laneOf = packLanes([...edges.values()], routeOf, columnOf)
+
+  // 9. shares, computed last so stage edges and outcome edges are on one denominator: every
+  // pipeline on the role. a width therefore means the same thing wherever it appears.
+  //
+  // these do NOT sum to 1 across a node's outgoing edges, and are not meant to. three reasons,
+  // all structural: a node below a fork is not in every pipeline, so the applicants who never
+  // reached it cannot appear on any edge leaving it; a node people stop at has no outgoing edges
+  // at all, and [APPLIED] on its own is a legal - and the initial - pipeline; and an outcome edge
+  // overlaps the stage edge beside it, because a rejected applicant truthfully both announced a
+  // round after this one and ended here, so a sum can even exceed 1. the conservation law this
+  // app relies on is on the nodes instead: badges sum to pipelines.length with each pipeline
+  // counted exactly once, which is what lets nodeHolds filter the roster to exactly the badge
+  const share = (weight: number): number =>
+    pipelines.length === 0 ? 0 : weight / pipelines.length
+
   return {
     nodes: nodes.map(({ sortKey: _sortKey, ...node }) => node),
-    edges: [...edges.values()],
+    edges: [...edges.values()].map((edge) => ({
+      ...edge,
+      share: share(edge.weight),
+      route: routeOf.get(edge.id) ?? 'chain',
+      lane: laneOf.get(edge.id) ?? 0,
+    })),
     columns: nodes.length === 0 ? 0 : Math.max(...nodes.map((node) => node.column)) + 1,
   }
+}
+
+// the share as a whole number. the floor stops a drawn edge from rounding to 0, which would
+// claim a line nobody walked - one applicant in three hundred is a real applicant
+export function sharePercent(edge: GraphEdge): number {
+  return Math.max(1, Math.round(edge.share * 100))
+}
+
+// what an edge says on the graph. both halves, because neither alone is a claim: 100% of two
+// applicants and 100% of two hundred are different statements
+export function edgeLabel(edge: GraphEdge): string {
+  return `${edge.weight} \u00b7 ${sharePercent(edge)}%`
 }
 
 // which pipelines a node's badge is counting. clicking a node filters the roster through this,
@@ -171,10 +226,63 @@ function bump(edges: Map<string, Edge>, source: string, target: string): void {
   const id = `${source}->${target}`
   const existing = edges.get(id)
   if (existing === undefined) {
-    edges.set(id, { id, source, target, weight: 1, outOfOrder: false })
+    edges.set(id, { id, source, target, weight: 1, backEdge: false })
   } else {
     existing.weight += 1
   }
+}
+
+// arcs are packed by interval-graph colouring. an arc occupies the whole span of columns between
+// its endpoints, so two arcs in the same band whose spans overlap must not share a lane or they
+// are drawn one on top of the other. sorting by left edge and taking the lowest free lane is the
+// standard greedy partition, and it needs every arc at once - which is why lanes are settled here,
+// beside the columns they are derived from, rather than in the renderer.
+//
+// keying a lane on the span's *length* instead is the obvious shortcut and it cannot work: two
+// arcs of equal length get the same lane by definition, so a staircase of equal-length hops - and
+// that is exactly what consecutive stages produce - collapses onto one line however the constants
+// are tuned. hops and loops are packed separately because they are drawn in different bands
+function packLanes(
+  all: Edge[],
+  routeOf: Map<string, EdgeRoute>,
+  columnOf: Map<string, number>,
+): Map<string, number> {
+  const spans = all
+    .filter((edge) => routeOf.get(edge.id) !== 'chain')
+    .map((edge) => {
+      const source = columnOf.get(edge.source) ?? 0
+      const target = columnOf.get(edge.target) ?? 0
+      return {
+        id: edge.id,
+        band: routeOf.get(edge.id) as EdgeRoute,
+        left: Math.min(source, target),
+        right: Math.max(source, target),
+      }
+    })
+    // by left edge, then widest first: the greedy partition's order. the id only breaks the
+    // remaining ties, so that the packing is the same however the applicants were sorted
+    .sort((a, b) => a.left - b.left || b.right - a.right || compare(a.id, b.id))
+
+  const placed: (typeof spans[number] & { lane: number })[] = []
+  const lane = new Map<string, number>()
+  for (const span of spans) {
+    let chosen = 0
+    while (
+      placed.some(
+        (other) =>
+          other.band === span.band &&
+          other.lane === chosen &&
+          // touching at a single column is not a clash: the two arcs meet that node at opposite
+          // handles, so one run ends before the other begins
+          Math.min(other.right, span.right) > Math.max(other.left, span.left),
+      )
+    ) {
+      chosen += 1
+    }
+    placed.push({ ...span, lane: chosen })
+    lane.set(span.id, chosen)
+  }
+  return lane
 }
 
 // a stage the enum no longer lists sorts to the end rather than to the front, which is where
@@ -189,8 +297,9 @@ function compare(a: string, b: string): number {
 }
 
 // depth-first from APPLIED#1 - the backend guarantees every stage list starts with APPLIED, so
-// there is exactly one root - flagging any edge that reaches a node still on the stack, then a
-// longest-path pass over what is left
+// there is exactly one root - marking any edge that reaches a node still on the stack, then a
+// longest-path pass over what is left. the graph itself may well be cyclic; it is only the
+// ranking that needs a DAG, which is the whole job of the marking
 function rankStages(
   ids: string[],
   edges: Map<string, Edge>,
@@ -207,11 +316,11 @@ function rankStages(
     }
   }
 
-  // THE TIE-BREAK, and it is load-bearing. without it, which edge gets blamed for a cycle
-  // depends on traversal order, which follows the applicants list sorted by userId - so one
-  // outlier could outrank a transition eight people recorded, and the whole layout would
-  // mirror if somebody renamed themselves. exploring the heaviest edge first means the
-  // consensus ordering lays out the graph and the outlier is the edge marked, every run
+  // THE TIE-BREAK, and it is load-bearing. without it, which edge of a cycle gets left out of
+  // ranking depends on traversal order, which follows the applicants list sorted by userId - so
+  // one outlier could outrank a transition eight people recorded, and the whole layout would
+  // mirror if somebody renamed themselves. exploring the heaviest edge first means the consensus
+  // ordering lays the graph out, every run. both edges are still drawn, and drawn the same
   for (const list of outgoing.values()) {
     list.sort((a, b) => {
       if (a.weight !== b.weight) {
@@ -250,8 +359,8 @@ function rankStages(
       frame.next += 1
       const seen = colour.get(edge.target) ?? WHITE
       if (seen === GRAY) {
-        // reaches a node still on the stack, so it closes a cycle
-        edge.outOfOrder = true
+        // reaches a node still on the stack, so it closes a cycle: hold it out of ranking
+        edge.backEdge = true
       } else if (seen === WHITE) {
         colour.set(edge.target, GRAY)
         stack.push({ id: edge.target, next: 0 })
@@ -272,7 +381,7 @@ function rankStages(
 
   // longest path over the acyclic remainder, in topological order
   const ranked = [...edges.values()].filter(
-    (edge) => !edge.outOfOrder && stageNodes.has(edge.source) && stageNodes.has(edge.target),
+    (edge) => !edge.backEdge && stageNodes.has(edge.source) && stageNodes.has(edge.target),
   )
   const indegree = new Map<string, number>(ids.map((id) => [id, 0]))
   for (const edge of ranked) {

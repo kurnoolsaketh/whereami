@@ -7,6 +7,10 @@
   --accent: #2f5bd7;
   --error-bg: #fdeceb;
   --error-text: #a3231a;
+  /* graph edges: light enough that a 6px line does not shout over the nodes it joins, dark
+     enough that a 1px one is still there. the arrowheads are filled with this too, from JS,
+     because an SVG marker takes its colour by attribute rather than by inheriting a stroke */
+  --edge: #97a1b0;
 
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   color: var(--text);
@@ -474,6 +478,21 @@ main:has(.role-view) {
   border: 1px solid var(--border);
   border-radius: 8px;
   background-color: var(--bg);
+
+  /* React Flow reads each of these as var(--xy-*, its own default) and never sets the
+     non-default half itself, so declaring them on the container is the supported way to theme
+     it - no selector has to out-specify the library's stylesheet */
+  --xy-edge-stroke: var(--edge);
+  --xy-edge-stroke-selected: var(--edge);
+  --xy-edge-label-background-color: var(--surface);
+  --xy-edge-label-color: var(--muted);
+}
+
+/* an edge label carries two values now - a count and a share - where it used to carry one
+   number, so the library's 10px is not enough to read them at a glance */
+.graph .react-flow__edge-text {
+  font-size: 0.7rem;
+  font-weight: 600;
 }
 
 /* React Flow ships its own node chrome; these are our own nodes, so they take the app's
@@ -528,8 +547,8 @@ main:has(.role-view) {
   font-weight: 600;
 }
 
-/* the loop handles exist to route back edges away from the main chain, not to be interacted
-   with - React Flow's default handle dots would otherwise be four specks on every node */
+/* the hop and loop handles exist to route an edge away from the main chain, not to be
+   interacted with - React Flow's default handle dots would otherwise be six specks per node */
 .graph-node .react-flow__handle {
   opacity: 0;
   pointer-events: none;
