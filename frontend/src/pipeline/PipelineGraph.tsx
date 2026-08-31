@@ -6,6 +6,7 @@ import {
   EdgeText,
   getSmoothStepPath,
   Handle,
+  Panel,
   Position,
   ReactFlow,
   ReactFlowProvider,
@@ -13,6 +14,7 @@ import {
   useReactFlow,
   type Edge,
   type EdgeProps,
+  type FitViewOptions,
   type Node,
   type NodeProps,
 } from '@xyflow/react'
@@ -24,6 +26,8 @@ import {
   type GraphNode,
   type Selection,
 } from './graph'
+import { endingVerb } from './status'
+import { nodeKey } from './stages'
 
 // graph.ts already assigned every node a column and a row, so there is no layout engine here -
 // React Flow is only asked to draw. the spacing is generous because React Flow routes an edge
@@ -181,7 +185,7 @@ export function PipelineGraph(props: PipelineGraphProps) {
 // graph blown up to 2x instead of the whole thing. refitting once measurement lands is the fix,
 // and re-running it when the shape changes means Refresh reframes rather than stranding new nodes
 // off-screen
-function FitOnMeasure({ shape }: { shape: string }) {
+function FitOnMeasure({ shape, options }: { shape: string; options: FitViewOptions }) {
   const measured = useNodesInitialized()
   const { fitView } = useReactFlow()
 
@@ -193,18 +197,26 @@ function FitOnMeasure({ shape }: { shape: string }) {
     // still framed the graph too tight. two frames puts it after the paint that settles them
     let frame = 0
     const first = requestAnimationFrame(() => {
-      frame = requestAnimationFrame(() => void fitView())
+      frame = requestAnimationFrame(() => {
+        void fitView(options)
+      })
     })
     return () => {
       cancelAnimationFrame(first)
       cancelAnimationFrame(frame)
     }
-  }, [measured, shape, fitView])
+  }, [measured, shape, options, fitView])
 
   return null
 }
 
 function Flow({ nodes, edges, selected, onSelect }: PipelineGraphProps) {
+  // the picked edge and the two nodes it names, which is everything the legend needs
+  const picked =
+    selected?.kind === 'edge' ? edges.find((edge) => edge.id === selected.id) : undefined
+  const pickedSource = nodes.find((node) => node.id === picked?.source)
+  const pickedTarget = nodes.find((node) => node.id === picked?.target)
+
   // the rows have to know how tall the arc bands are, and the arcs have to know their own lane,
   // so both are measured once from the edges and shared
   const bands = useMemo(() => measureBands(edges), [edges])
@@ -273,7 +285,12 @@ function Flow({ nodes, edges, selected, onSelect }: PipelineGraphProps) {
         nodesDraggable={false}
         nodesConnectable={false}
         edgesFocusable={false}
+        // both fits take the same options. the prop's fit runs first and too early - before the
+        // nodes are measured - and FitOnMeasure corrects it; but the prop cannot simply be dropped
+        // (without it no fit is queued at all) and if it is left to its own defaults its fit lands
+        // last and silently discards the padding that keeps the graph clear of the legend
         fitView
+        fitViewOptions={FIT_OPTIONS}
         proOptions={{ hideAttribution: false }}
         onNodeClick={(_event, node) =>
           onSelect(
@@ -293,13 +310,96 @@ function Flow({ nodes, edges, selected, onSelect }: PipelineGraphProps) {
         onEdgeMouseLeave={() => setHovered(null)}
         onPaneClick={() => onSelect(null)}
       >
-        <FitOnMeasure shape={nodes.map((node) => node.id).join()} />
+        <FitOnMeasure shape={nodes.map((node) => node.id).join()} options={FIT_OPTIONS} />
+        {picked !== undefined && pickedSource !== undefined && pickedTarget !== undefined && (
+          <Legend edge={picked} source={pickedSource.label} target={pickedTarget} />
+        )}
         {/* the graph can be wider than the panel on a role with a long pipeline, so it pans
             and zooms, and the controls say so */}
         <Background gap={20} size={1} />
         <Controls showInteractive={false} />
       </ReactFlow>
     </div>
+  )
+}
+
+// breathing room between the fitted graph and the canvas edges. the legend is deliberately NOT
+// fitted around: it appears only on a click, so reserving the corner permanently would waste it on
+// every role, and re-fitting when it appears would move the very line that was just clicked
+const FIT_PADDING = 16
+
+// React Flow reads a bare number as a fraction of the viewport, so padding in pixels has to carry
+// its unit - and the annotation is what keeps the template literal's type
+const px = (value: number): `${number}px` => `${value}px`
+
+// both fits take these: the prop's and FitOnMeasure's. left to its defaults the prop's fit lands
+// last and silently discards them
+const FIT_OPTIONS: FitViewOptions = {
+  padding: {
+    top: px(FIT_PADDING),
+    right: px(FIT_PADDING),
+    bottom: px(FIT_PADDING),
+    left: px(FIT_PADDING),
+  },
+}
+
+// the sample line's weight. middling on the 1..6 scale, so "thicker means a larger share" has
+// somewhere to go in both directions rather than sitting at one end of it
+const LEGEND_STROKE = 3.5
+const LEGEND_WIDTH = 176
+const LEGEND_MID = 13
+
+// the chip has to fit whatever the clicked edge says - "1 · 14%" and "12 · 100%" are not the same
+// width - and its exact width carries no meaning, so it is estimated from the glyph count rather
+// than measured through another render
+const LEGEND_CHIP_PAD = 12
+const LEGEND_GLYPH = 6.2
+
+// everyone reaches the first node by applying, so it is the one origin that does not read as a
+// round somebody got to. the same pair rankStages calls the root
+const ROOT = nodeKey('APPLIED', 1)
+
+// what one line means, shown when it is clicked. the sample is that line in miniature - the same
+// colour, the same chip, an arrowhead from the same geometry, and the clicked edge's own numbers -
+// so the panel and the line it explains are matched by sight before a word is read
+function Legend({ edge, source, target }: { edge: GraphEdge; source: string; target: GraphNode }) {
+  const label = edgeLabel(edge)
+  const chip = label.length * LEGEND_GLYPH + LEGEND_CHIP_PAD
+  const length = ARROW_LENGTH + ARROW_PER_STROKE * LEGEND_STROKE
+  const halfWidth = ARROW_HALF_WIDTH + ARROW_PER_STROKE * LEGEND_STROKE
+  const base = LEGEND_WIDTH - length
+
+  // "advanced" is only true of a move between rounds; an ending needs the verb of its own status
+  const verb =
+    target.kind === 'outcome'
+      ? endingVerb(target.id as Parameters<typeof endingVerb>[0], edge.weight)
+      : 'advanced'
+  const origin = edge.source === ROOT ? 'applied' : `reached ${source}`
+
+  return (
+    <Panel position="top-left" className="graph-legend">
+      <svg width={LEGEND_WIDTH} height={LEGEND_MID * 2} aria-hidden="true">
+        <line x1={2} y1={LEGEND_MID} x2={base} y2={LEGEND_MID} strokeWidth={LEGEND_STROKE} />
+        <polygon
+          points={`${LEGEND_WIDTH},${LEGEND_MID} ${base},${LEGEND_MID - halfWidth} ${base},${LEGEND_MID + halfWidth}`}
+        />
+        <rect
+          x={(LEGEND_WIDTH - chip) / 2}
+          y={LEGEND_MID - CHIP_HEIGHT / 2}
+          width={chip}
+          height={CHIP_HEIGHT}
+          rx={4}
+        />
+        <text x={LEGEND_WIDTH / 2} y={LEGEND_MID}>
+          {label}
+        </text>
+      </svg>
+      <p>
+        <strong>{edge.weight}</strong> applicant{edge.weight === 1 ? '' : 's'} {verb} — this is{' '}
+        <strong>{sharePercent(edge)}%</strong> of everyone who {origin}. A thicker line means a
+        larger share of applicants advanced.
+      </p>
+    </Panel>
   )
 }
 

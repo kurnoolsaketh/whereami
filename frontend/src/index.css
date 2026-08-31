@@ -495,6 +495,51 @@ main:has(.role-view) {
   font-weight: 600;
 }
 
+/* the legend explains a line's label by showing one. it takes the same tokens as the real edges -
+   --edge for the line and arrowhead, --surface for the chip - so the sample and the thing it
+   describes cannot drift apart. pointer-events are off so it never swallows a click meant for an
+   edge underneath it */
+.graph-legend.react-flow__panel {
+  max-width: 14rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  /* the canvas colour, not the card's: the sample chip is --surface like the real ones, so it
+     only reads as a chip against the background the real ones sit on */
+  background-color: var(--bg);
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+.graph-legend p {
+  margin: 0.25rem 0 0;
+}
+
+.graph-legend strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.graph-legend line,
+.graph-legend polygon {
+  stroke: var(--edge);
+  fill: var(--edge);
+}
+
+.graph-legend rect {
+  fill: var(--surface);
+}
+
+.graph-legend text {
+  fill: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+
 /* clicking a line filters the roster the way clicking a node does, so it has to look clickable.
    the colour change on hover is driven from JS rather than here, because a hovered line also has
    to be raised above the ones it crosses and SVG has no z-index */

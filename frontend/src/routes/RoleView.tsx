@@ -148,15 +148,6 @@ export function RoleView() {
           {graph !== null && graph.nodes.length > 0 && (
             <div className="card">
               <h3>The pipeline for this role</h3>
-              <p>
-                Every ordering anyone recorded, laid over each other. A badge counts the people
-                standing there now. A line is a move people have actually made: it is labelled
-                with how many went that way and what share of everyone who reached that round they
-                are, and is drawn thicker the larger that share. So a line that loops back is a
-                round this role really repeats, drawn like any other. A round nobody has reached
-                yet has no lines leaving it. Point at a line to pick it out of the others, and
-                click a node or a line to see who is on it.
-              </p>
               <PipelineGraph
                 nodes={graph.nodes}
                 edges={graph.edges}

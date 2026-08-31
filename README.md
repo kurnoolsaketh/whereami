@@ -59,7 +59,8 @@ two applicants on one role without needing two browsers.
 
 ### The role view
 
-The graph merges every stage ordering anyone recorded for that role into one picture.
+The graph merges every stage ordering anyone recorded for that role into one picture. Clicking a
+line explains it in the top-left corner, showing that line's own numbers in a sample chip.
 
 - A node is a **(stage, occurrence)** pair, so someone's second technical round is a
   different node from their first. A stage is numbered only if the role spans more than one

@@ -22,3 +22,24 @@ export function outcomes(statuses: Status[]): Status[] {
 export function statusLabel(status: Status): string {
   return enumLabel(status)
 }
+
+// how ending in each status reads in a sentence. "advanced" is true of a move between rounds and
+// false of every one of these - nobody advances into a rejection - so the verb has to come from
+// the status itself.
+//
+// naming them here does not break the rule above: a status the enum gains later still gets its
+// node, its button and its tag with no change, and falls through to phrasing built from its own
+// label rather than to anything wrong
+const ENDINGS: Partial<Record<Status, { one: string; many: string }>> = {
+  REJECTED: { one: 'was rejected', many: 'were rejected' },
+  OFFER: { one: 'got an offer', many: 'got an offer' },
+  USER_WITHDREW: { one: 'withdrew', many: 'withdrew' },
+}
+
+export function endingVerb(status: Status, count: number): string {
+  const ending = ENDINGS[status]
+  if (ending === undefined) {
+    return `ended in ${statusLabel(status)}`
+  }
+  return count === 1 ? ending.one : ending.many
+}
