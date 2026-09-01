@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import {
   Background,
   BaseEdge,
@@ -29,11 +29,16 @@ import {
 import { endingVerb } from './status'
 import { nodeKey } from './stages'
 
-// graph.ts already assigned every node a column and a row, so there is no layout engine here -
-// React Flow is only asked to draw. the spacing is generous because React Flow routes an edge
-// as a spline between two handles rather than around whatever sits in between, so a transition
-// that skips several columns needs room to arc clear of the nodes it passes
-const COLUMN_WIDTH = 220
+// graph.ts already assigned every node a depth and a slot, so there is no layout engine here -
+// React Flow is only asked to draw. depth reads down the screen and slots spread across it. the
+// spacing is generous because React Flow routes an edge as a spline between two handles rather
+// than around whatever sits in between, so a transition that skips several depths needs room to
+// arc clear of the nodes it passes.
+//
+// how wide one slot is before its arc bands are added. a node's width comes from its label and
+// nothing has been measured at the moment positions are handed over, so this is an allowance for
+// the longest stage name plus the air beside it, not a measurement
+const SLOT_WIDTH = 220
 
 // one colour for the line and its arrowhead. the line takes it from the stylesheet and the
 // marker has to be told, because an SVG marker is filled by attribute, so both name the same var
@@ -62,42 +67,47 @@ const ARROW_LENGTH = 9
 const ARROW_HALF_WIDTH = 3.6
 const ARROW_PER_STROKE = 0.75
 
-// graph.ts hands every arc a lane index, packed so that no two overlapping arcs share one. all
-// that is left here is turning an index into a distance from the node, which is the one part that
-// has to know about pixels.
-//
-// lanes are spaced to fit a label rather than to fit the row: a chip is CHIP_HEIGHT tall and sits
-// on its own line, so anything less and two stacked arcs' labels overlap however they are nudged
-// along. an earlier version squeezed the lanes to keep the band inside a fixed ROW_HEIGHT and
-// that is what crowded the labels - the height was never the binding constraint anyway, since
-// fitView scales this graph on its width. so the band takes the room it needs and the row pitch
-// follows it, which is ROW_HEIGHT's whole job
+// the pitch between two depths, and unlike the one between two slots it is a plain constant:
+// nothing arcs between two rows, so a row needs room for a node and for the chip a chain edge
+// parks in the gap below it, and nothing else
 const NODE_HEIGHT = 34
-const ARC_LANE = 26
-const ROW_GAP = 22
-
-// how far a label sits off its own line. it used to sit centred ON the line, which works while a
-// label is a single number and stops working the moment it is two: the chip is ~54px wide, and a
-// node as wide as "Hiring Manager Screen" leaves only COLUMN_WIDTH - 177 = 43px beside it, so the
-// chip covered the line and the arrowhead both. widening the columns until it fits is not the fix
-// - the gap is COLUMN_WIDTH minus a node width, and both follow the content, so it would hold
-// only for today's longest stage name, and fitView would shrink the whole graph to pay for it.
-//
-// only a chain edge needs the treatment. it runs through the node row and its chip is wider than
-// the gap the nodes leave, so it has to clear the row outright - half a node plus half a chip - or
-// it clips the boxes either side instead of the line.
-//
-// an arc has none of that: it runs across open space with room to spare, so its label sits on its
-// own line, interrupting it. lifting an arc's label was worse, not better - lanes pack as close as
-// the band allows, so a chip lifted clear of its own arc lands on the one above, and which arc it
-// belonged to stopped being obvious
 const CHIP_HEIGHT = 19
-const CHAIN_LABEL_LIFT = NODE_HEIGHT / 2 + CHIP_HEIGHT / 2 + 2
-const ARC_LABEL_LIFT = 0
+const DEPTH_GAP = 30
+const DEPTH_PITCH = NODE_HEIGHT + CHIP_HEIGHT + DEPTH_GAP
 
-// clear of the chain label a chain edge has parked above the node, plus a little air
-const HOP_BAND_START = CHAIN_LABEL_LIFT + CHIP_HEIGHT / 2 - NODE_HEIGHT / 2 + 6
-const LOOP_BAND_START = 16
+// graph.ts hands every arc a lane index, packed so that no two overlapping arcs share one. all
+// that is left here is turning an index into a distance from the node's side, which is the one
+// part that has to know about pixels.
+//
+// lanes are spaced to fit a label, and the label an arc has to clear now sits beside it rather
+// than above it - a chip is about three times wider than it is tall, so a lane is wider than it
+// used to be deep. that room is the cheap one on this layout: fitView scales the graph on its
+// height now, and a role whose applicants all walked the same order takes none of these bands at
+// all and stays as narrow as it ever was
+const ARC_LANE = 34
+
+// roughly how wide a chip is - "12 · 100%" at the edge font. estimated from the glyph count
+// rather than measured through another render, the same way the legend estimates its own: the
+// exact width carries no meaning, it only has to be close enough to leave the arcs room
+const CHIP_WIDTH = 56
+
+// how far a label sits off its own line, across the line rather than along it.
+//
+// a chain edge needs none: it runs straight down through open space, and the gap below a node is
+// sized to hold its chip, so the chip sits on the line and interrupts it, the way an arc's always
+// has. this is the one thing the turn made simpler - laid out left to right, a chain label had to
+// clear the whole node row, because the chip was wider than the gap a name like "Hiring Manager
+// Screen" left beside it and it covered the line and the arrowhead both.
+//
+// an arc's does lift, outward from the node, because lane 0 hugs the node's side closely enough
+// that a chip centred on it would lie over the box
+const ARC_LABEL_LIFT = 18
+
+// where each band starts, measured out from the node's side. nothing is parked out here for the
+// first lane to clear any more - a chain edge's chip is below the node, not beside it - so an arc
+// only has to leave the node's own border
+const HOP_BAND_START = 14
+const LOOP_BAND_START = 14
 
 // where along its run each lane parks its label. cycling through these by lane means two arcs
 // stacked a few pixels apart put their chips at different points, so neither covers the other
@@ -107,24 +117,28 @@ function laneOffset(route: GraphEdge['route'], lane: number): number {
   return (route === 'loop' ? LOOP_BAND_START : HOP_BAND_START) + lane * ARC_LANE
 }
 
-// how much room the arcs actually need above and below a row, and therefore how far apart the
-// rows have to sit. a role whose applicants all walked the same order needs none of it and stays
-// as compact as it ever was
-function measureBands(edges: GraphEdge[]): { hop: number; loop: number; rowPitch: number } {
-  const depth = { hop: 0, loop: 0 }
+// how much room the arcs actually need either side of a slot, and therefore how far apart the
+// slots have to sit. hops run down the right of a node and loops back up its left, so between two
+// neighbours the two bands sit end to end.
+//
+// the two widths are handed out as well as the pitch, because the fit needs them too: fitView
+// frames the *nodes*, and the outermost slots' bands hang outside that box - so without them the
+// arc running down the right of the last slot is cut off at the panel's edge
+function measureBands(edges: GraphEdge[]): { left: number; right: number; slotPitch: number } {
+  const lanes = { hop: 0, loop: 0 }
   for (const edge of edges) {
     if (edge.route !== 'chain') {
-      depth[edge.route] = Math.max(depth[edge.route], edge.lane + 1)
+      lanes[edge.route] = Math.max(lanes[edge.route], edge.lane + 1)
     }
   }
-  const above = depth.hop === 0 ? 0 : laneOffset('hop', depth.hop - 1) + CHIP_HEIGHT / 2
-  const below = depth.loop === 0 ? 0 : laneOffset('loop', depth.loop - 1) + CHIP_HEIGHT / 2
-  return { ...depth, rowPitch: NODE_HEIGHT + above + below + ROW_GAP }
+  const right = lanes.hop === 0 ? 0 : laneOffset('hop', lanes.hop - 1) + CHIP_WIDTH / 2
+  const left = lanes.loop === 0 ? 0 : laneOffset('loop', lanes.loop - 1) + CHIP_WIDTH / 2
+  return { left, right, slotPitch: SLOT_WIDTH + right + left }
 }
 
 // which pair of handles each route leaves and arrives by. everything else about an edge - colour,
 // dash, label format - is identical, because a cycle is a shape a role really has and not a
-// mistake anyone made. only the path differs, so that an edge which does not run left to right is
+// mistake anyone made. only the path differs, so that an edge which does not run straight down is
 // visible at all rather than splined flat along the chain and lost under it
 // which way an edge is heading as it arrives, per handle it arrives at
 const APPROACH: Record<Position, [number, number]> = {
@@ -134,6 +148,7 @@ const APPROACH: Record<Position, [number, number]> = {
   [Position.Bottom]: [0, -1],
 }
 
+// chain runs Bottom -> Top, hop arcs down the right, loop arcs back up the left
 const ROUTES = {
   chain: { sourceHandle: 'out', targetHandle: 'in' },
   hop: { sourceHandle: 'hop-out', targetHandle: 'hop-in' },
@@ -145,12 +160,13 @@ interface EdgeData extends Record<string, unknown> {
   // the smoothstep offset for an arc: how far off the node it runs before turning. undefined for
   // a chain edge, which takes the library's default
   lane: number | undefined
-  // signed, because a label lifts away from the chain rather than always upwards
+  // signed, because a label sits to the right of a hop and to the left of a loop - each on the
+  // open side of its own arc
   lift: number
   // where along the edge the label sits, 0..1 from source to target. arcs in neighbouring lanes
-  // are only a few pixels apart vertically, so if every one of them centred its label the chips
-  // would pile up in the middle of the graph; sliding them apart by lane keeps each one over its
-  // own line and clear of the next. undefined leaves the label at the path's own midpoint
+  // are only a lane apart across the run, which is less than a chip is wide, so if every one of
+  // them centred its label the chips would pile up on each other; sliding them apart down the run
+  // keeps each one beside its own line. undefined leaves the label at the path's own midpoint
   labelAt: number | undefined
   // pointed at or picked. one flag, because both mean the same thing to a reader - this is the
   // line you are asking about - and only their persistence differs
@@ -167,6 +183,9 @@ interface NodeData extends Record<string, unknown> {
 interface PipelineGraphProps {
   nodes: GraphNode[]
   edges: GraphEdge[]
+  // how many rows deep the graph is, which is what the panel is sized from. taken from graph.ts
+  // rather than recounted here, so the height and the layout cannot disagree
+  depths: number
   selected: Selection | null
   onSelect: (selection: Selection | null) => void
 }
@@ -210,23 +229,43 @@ function FitOnMeasure({ shape, options }: { shape: string; options: FitViewOptio
   return null
 }
 
-function Flow({ nodes, edges, selected, onSelect }: PipelineGraphProps) {
+function Flow({ nodes, edges, depths, selected, onSelect }: PipelineGraphProps) {
   // the picked edge and the two nodes it names, which is everything the legend needs
   const picked =
     selected?.kind === 'edge' ? edges.find((edge) => edge.id === selected.id) : undefined
   const pickedSource = nodes.find((node) => node.id === picked?.source)
   const pickedTarget = nodes.find((node) => node.id === picked?.target)
 
-  // the rows have to know how tall the arc bands are, and the arcs have to know their own lane,
+  // the slots have to know how wide the arc bands are, and the arcs have to know their own lane,
   // so both are measured once from the edges and shared
   const bands = useMemo(() => measureBands(edges), [edges])
+
+  // the panel grows with the graph instead of scaling it into a fixed box: a role with three
+  // rounds looks exactly as it did, and one with ten gets the room rather than being shrunk to
+  // fit. past the cap it pans and zooms, as it always has
+  const height = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, depths * DEPTH_PITCH + 2 * FIT_PADDING))
+
+  // both fits take these - the prop's and FitOnMeasure's - so the object has to keep its identity
+  // between renders, and it reserves the arc bands beside the outermost slots on top of the plain
+  // breathing room
+  const fitOptions = useMemo<FitViewOptions>(
+    () => ({
+      padding: {
+        top: px(FIT_PADDING),
+        bottom: px(FIT_PADDING),
+        left: px(FIT_PADDING + bands.left),
+        right: px(FIT_PADDING + bands.right),
+      },
+    }),
+    [bands.left, bands.right],
+  )
 
   const flowNodes = useMemo<Node<NodeData>[]>(
     () =>
       nodes.map((node) => ({
         id: node.id,
         type: node.kind,
-        position: { x: node.column * COLUMN_WIDTH, y: node.row * bands.rowPitch },
+        position: { x: node.slot * bands.slotPitch, y: node.depth * DEPTH_PITCH },
         data: {
           label: node.label,
           count: node.count,
@@ -238,7 +277,7 @@ function Flow({ nodes, edges, selected, onSelect }: PipelineGraphProps) {
         draggable: false,
         connectable: false,
       })),
-    [nodes, selected, bands.rowPitch],
+    [nodes, selected, bands.slotPitch],
   )
 
   // which line the pointer is on. this is React state rather than a CSS :hover rule because a lit
@@ -263,7 +302,7 @@ function Flow({ nodes, edges, selected, onSelect }: PipelineGraphProps) {
             label: edgeLabel(edge),
             lane:
               route === 'chain' ? undefined : laneOffset(route, edge.lane),
-            lift: route === 'chain' ? -CHAIN_LABEL_LIFT : ARC_LABEL_LIFT,
+            lift: route === 'chain' ? 0 : route === 'loop' ? -ARC_LABEL_LIFT : ARC_LABEL_LIFT,
             labelAt: route === 'chain' ? undefined : LABEL_STOPS[edge.lane % LABEL_STOPS.length],
             lit,
           } satisfies EdgeData,
@@ -276,7 +315,7 @@ function Flow({ nodes, edges, selected, onSelect }: PipelineGraphProps) {
   }, [edges, hovered, selected])
 
   return (
-    <div className="graph">
+    <div className="graph" style={{ '--graph-height': px(height) } as CSSProperties}>
       <ReactFlow
         nodes={flowNodes}
         edges={flowEdges}
@@ -290,7 +329,7 @@ function Flow({ nodes, edges, selected, onSelect }: PipelineGraphProps) {
         // (without it no fit is queued at all) and if it is left to its own defaults its fit lands
         // last and silently discards the padding that keeps the graph clear of the legend
         fitView
-        fitViewOptions={FIT_OPTIONS}
+        fitViewOptions={fitOptions}
         proOptions={{ hideAttribution: false }}
         onNodeClick={(_event, node) =>
           onSelect(
@@ -310,18 +349,25 @@ function Flow({ nodes, edges, selected, onSelect }: PipelineGraphProps) {
         onEdgeMouseLeave={() => setHovered(null)}
         onPaneClick={() => onSelect(null)}
       >
-        <FitOnMeasure shape={nodes.map((node) => node.id).join()} options={FIT_OPTIONS} />
+        <FitOnMeasure shape={nodes.map((node) => node.id).join()} options={fitOptions} />
         {picked !== undefined && pickedSource !== undefined && pickedTarget !== undefined && (
           <Legend edge={picked} source={pickedSource.label} target={pickedTarget} />
         )}
-        {/* the graph can be wider than the panel on a role with a long pipeline, so it pans
-            and zooms, and the controls say so */}
+        {/* the graph can be taller than the panel on a role with a long pipeline, so it pans
+            and zooms, and the controls say so. they sit top-right because the corner they used to
+            hold is now the bottom of the graph: the outcomes are the last row, and the leftmost of
+            them landed behind the buttons */}
         <Background gap={20} size={1} />
-        <Controls showInteractive={false} />
+        <Controls showInteractive={false} position="top-right" />
       </ReactFlow>
     </div>
   )
 }
+
+// the panel's floor and ceiling. the floor is the height the panel always had, so a short role
+// is framed exactly as it was; the ceiling is where growing stops and panning takes over
+const MIN_HEIGHT = 416
+const MAX_HEIGHT = 640
 
 // breathing room between the fitted graph and the canvas edges. the legend is deliberately NOT
 // fitted around: it appears only on a click, so reserving the corner permanently would waste it on
@@ -331,17 +377,6 @@ const FIT_PADDING = 16
 // React Flow reads a bare number as a fraction of the viewport, so padding in pixels has to carry
 // its unit - and the annotation is what keeps the template literal's type
 const px = (value: number): `${number}px` => `${value}px`
-
-// both fits take these: the prop's and FitOnMeasure's. left to its defaults the prop's fit lands
-// last and silently discards them
-const FIT_OPTIONS: FitViewOptions = {
-  padding: {
-    top: px(FIT_PADDING),
-    right: px(FIT_PADDING),
-    bottom: px(FIT_PADDING),
-    left: px(FIT_PADDING),
-  },
-}
 
 // the sample line's weight. middling on the 1..6 scale, so "thicker means a larger share" has
 // somewhere to go in both directions rather than sitting at one end of it
@@ -405,44 +440,44 @@ function Legend({ edge, source, target }: { edge: GraphEdge; source: string; tar
 
 // a round somebody walks through, with the number of people standing there now.
 //
-// the two Top handles, and the two Bottom ones, would otherwise be coincident anchors at the
-// middle of their edge, so each is nudged to the side its traffic comes from: hops run left to
-// right, so they leave from the right of the top edge and arrive at the left of it, and loops run
-// right to left, so they do the opposite underneath. that keeps both families of arc monotone
-// instead of doubling back on themselves at the ends
+// the two Right handles, and the two Left ones, would otherwise be coincident anchors at the
+// middle of their edge, so each is nudged to the end its traffic comes from: hops run downward, so
+// they leave low on the right edge and arrive high on it, and loops run back upward, so they do
+// the opposite on the left. that keeps both families of arc monotone instead of doubling back on
+// themselves at the ends
 function StageNode({ data }: NodeProps<Node<NodeData>>) {
   return (
     <div className={nodeClass('graph-stage', data)}>
-      <Handle type="target" position={Position.Left} id="in" isConnectable={false} />
+      <Handle type="target" position={Position.Top} id="in" isConnectable={false} />
       <Handle
         type="target"
-        position={Position.Top}
+        position={Position.Right}
         id="hop-in"
-        style={{ left: '30%' }}
+        style={{ top: '30%' }}
         isConnectable={false}
       />
       <Handle
         type="source"
-        position={Position.Top}
+        position={Position.Right}
         id="hop-out"
-        style={{ left: '70%' }}
+        style={{ top: '70%' }}
         isConnectable={false}
       />
       <span className="graph-label">{data.label}</span>
       {data.count > 0 && <span className="graph-count">{data.count}</span>}
-      <Handle type="source" position={Position.Right} id="out" isConnectable={false} />
+      <Handle type="source" position={Position.Bottom} id="out" isConnectable={false} />
       <Handle
         type="source"
-        position={Position.Bottom}
+        position={Position.Left}
         id="loop-out"
-        style={{ left: '30%' }}
+        style={{ top: '30%' }}
         isConnectable={false}
       />
       <Handle
         type="target"
-        position={Position.Bottom}
+        position={Position.Left}
         id="loop-in"
-        style={{ left: '70%' }}
+        style={{ top: '70%' }}
         isConnectable={false}
       />
     </div>
@@ -450,19 +485,19 @@ function StageNode({ data }: NodeProps<Node<NodeData>>) {
 }
 
 // how an application ended. visually distinct from a stage because it is a result, not a round
-// to walk through - the final column should read as an ending at a glance
+// to walk through - the last row should read as an ending at a glance
 function OutcomeNode({ data }: NodeProps<Node<NodeData>>) {
   return (
     <div className={nodeClass('graph-outcome', data)}>
       {/* an outcome has no outgoing edges, so it can never be an ancestor and never a loop's
-          target; and it sits right of every stage, so an edge into it is a chain step or a hop
+          target; and it sits below every stage, so an edge into it is a chain step or a hop
           and never a loop. two inbound handles is all it needs */}
-      <Handle type="target" position={Position.Left} id="in" isConnectable={false} />
+      <Handle type="target" position={Position.Top} id="in" isConnectable={false} />
       <Handle
         type="target"
-        position={Position.Top}
+        position={Position.Right}
         id="hop-in"
-        style={{ left: '30%' }}
+        style={{ top: '30%' }}
         isConnectable={false}
       />
       <span className="graph-label">{data.label}</span>
@@ -489,7 +524,7 @@ function PipelineEdge({
   const length = ARROW_LENGTH + ARROW_PER_STROKE * stroke
   const halfWidth = ARROW_HALF_WIDTH + ARROW_PER_STROKE * stroke
   // the direction the edge is travelling as it arrives, which is fixed by the handle it arrives
-  // at: a chain edge comes in from the left, a hop drops in from above, a loop rises from below
+  // at: a chain edge comes in from above, a hop arrives at the right, a loop at the left
   const [dx, dy] = APPROACH[targetPosition]
 
   // the line stops where the head begins, so the two meet instead of overlapping
@@ -510,17 +545,18 @@ function PipelineEdge({
     .map(([x, y]) => `${x},${y}`)
     .join(' ')
 
-  // the path's own midpoint, unless the edge asked for somewhere else along its run
-  const x =
-    data?.labelAt === undefined ? labelX : sourceX + (targetX - sourceX) * data.labelAt
+  // the path's own midpoint, unless the edge asked for somewhere else along its run - which now
+  // means further down it, since every edge on this layout travels mostly downward
+  const y =
+    data?.labelAt === undefined ? labelY : sourceY + (targetY - sourceY) * data.labelAt
 
   return (
     <>
       <BaseEdge path={path} style={style} />
       <polygon points={head} fill={data?.lit ? EDGE_PICKED_COLOUR : EDGE_COLOUR} />
       <EdgeText
-        x={x}
-        y={labelY + (data?.lift ?? 0)}
+        x={labelX + (data?.lift ?? 0)}
+        y={y}
         label={data?.label ?? ''}
         labelShowBg
         labelBgPadding={[6, 3]}

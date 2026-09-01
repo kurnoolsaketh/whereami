@@ -8,7 +8,7 @@ import { isActive, statusLabel } from './status'
 //
 // the result is a directed graph and may well contain cycles: a role that sends someone back for
 // a second behavioral round after a technical one is a real shape, not an error by the applicant
-// who wrote it down. only the column ranking needs a DAG, and it makes its own by holding one
+// who wrote it down. only the depth ranking needs a DAG, and it makes its own by holding one
 // edge of each cycle aside - see backEdge
 
 export interface GraphNode {
@@ -18,8 +18,11 @@ export interface GraphNode {
   kind: 'stage' | 'outcome'
   label: string
   count: number
-  column: number
-  row: number
+  // where the node sits in the drawing: `depth` is its distance from Applied, which the renderer
+  // reads downward, and `slot` is its place across the row of nodes at that depth. the pair is
+  // all the layout there is - the renderer turns it into pixels and decides nothing itself
+  depth: number
+  slot: number
 }
 
 export interface GraphEdge {
@@ -41,10 +44,10 @@ export interface GraphEdge {
   lane: number
 }
 
-// 'chain' runs to the next column and is drawn straight; 'hop' reaches past it and arcs over the
-// nodes in between; 'loop' closes a cycle and arcs under them. decided here rather than in the
-// renderer because lane packing needs it - and because two places deriving the same thing from
-// the columns is exactly how they drift apart
+// 'chain' runs to the next depth and is drawn straight down; 'hop' reaches past it and arcs down
+// one side of the nodes in between; 'loop' closes a cycle and arcs back up the other. decided here
+// rather than in the renderer because lane packing needs it - and because two places deriving the
+// same thing from the depths is exactly how they drift apart
 export type EdgeRoute = 'chain' | 'hop' | 'loop'
 
 // what the role view is filtered to: a node's badge, or a line's count
@@ -53,10 +56,11 @@ export type Selection = { kind: 'node' | 'edge'; id: string }
 export interface Graph {
   nodes: GraphNode[]
   edges: GraphEdge[]
-  columns: number
+  depths: number
 }
 
-// a node plus the key its column sorts on, which is dropped before the graph is returned
+// a node plus the key it falls back to when no parent decides its slot, dropped before the graph
+// is returned
 interface Ranked extends GraphNode {
   sortKey: [number, number]
 }
@@ -67,7 +71,7 @@ interface Ranked extends GraphNode {
 type Edge = Omit<GraphEdge, 'share' | 'route' | 'lane'>
 
 // `order` is GET /api/stages and `statusOrder` is GET /api/statuses. both are only used to make
-// the layout deterministic - which node sits above which - never to decide what exists
+// the layout deterministic - which node sits beside which - never to decide what exists
 export function buildGraph(
   pipelines: Pipeline[],
   order: Stage[],
@@ -85,9 +89,9 @@ export function buildGraph(
   // 2. two edge sets, because layout and display want different things.
   //
   // `announced` is every consecutive pair anyone was told about, walked or not. it exists only to
-  // rank the columns: a round nobody has reached yet still belongs to the right of the one before
-  // it, and ranking on it is what keeps the layout still while applicants advance rather than
-  // reshuffling under them.
+  // lay the graph out: a round nobody has reached yet still belongs below the one before it, and
+  // ranking on it is what keeps the layout still while applicants advance rather than reshuffling
+  // under them.
   //
   // `drawn` is what the graph actually shows: only transitions somebody has *made*. an edge is a
   // record of a move, so an applicant sitting at Applied with five rounds ahead is on none of them
@@ -131,15 +135,15 @@ export function buildGraph(
   const stageNodeLabel = (stage: Stage, occurrence: number): string =>
     occurrences.get(stage) === 1 ? enumLabel(stage) : `${enumLabel(stage)} ${occurrence}`
 
-  // 4. columns for stage nodes: the longest path from the root, with cycles broken first. over
+  // 4. depths for stage nodes: the longest path from the root, with cycles broken first. over
   // the announced edges, so the shape of the role decides the layout rather than how far along it
   // people happen to be today
-  const columns = rankStages([...stageNodes.keys()], announced, order, stageNodes)
-  const maxStageColumn = Math.max(-1, ...columns.values())
+  const depthOf = rankStages([...stageNodes.keys()], announced, order, stageNodes)
+  const maxStageDepth = Math.max(-1, ...depthOf.values())
 
   // 5. outcome nodes, synthesized only now. ranking first is what makes "always last" true:
-  // ranked together, one pipeline rejected after the recruiter screen would drag REJECTED into
-  // column 2, in the middle of the graph. a status nobody holds produces no node at all
+  // ranked together, one pipeline rejected after the recruiter screen would drag REJECTED up to
+  // the third row, into the middle of the graph. a status nobody holds produces no node at all
   const held = new Set<Status>()
   for (const pipeline of pipelines) {
     if (!isActive(pipeline)) {
@@ -156,15 +160,15 @@ export function buildGraph(
     counts.set(at, (counts.get(at) ?? 0) + 1)
   }
 
-  // 7. rows, assigned per column so the layout is reproducible run to run
+  // 7. slots, assigned a depth at a time so the layout is reproducible run to run
   const nodes: Ranked[] = [
     ...[...stageNodes.entries()].map(([id, { stage, occurrence }]) => ({
       id,
       kind: 'stage' as const,
       label: stageNodeLabel(stage, occurrence),
       count: counts.get(id) ?? 0,
-      column: columns.get(id) ?? 0,
-      row: 0,
+      depth: depthOf.get(id) ?? 0,
+      slot: 0,
       sortKey: [rankOf(stage, order), occurrence] as [number, number],
     })),
     ...[...held].map((status) => ({
@@ -172,31 +176,15 @@ export function buildGraph(
       kind: 'outcome' as const,
       label: statusLabel(status),
       count: counts.get(status) ?? 0,
-      column: maxStageColumn + 1,
-      row: 0,
+      depth: maxStageDepth + 1,
+      slot: 0,
       sortKey: [rankOf(status, statusOrder), 0] as [number, number],
     })),
   ]
 
-  const perColumn = new Map<number, Ranked[]>()
-  for (const node of nodes) {
-    const bucket = perColumn.get(node.column)
-    if (bucket === undefined) {
-      perColumn.set(node.column, [node])
-    } else {
-      bucket.push(node)
-    }
-  }
-  for (const bucket of perColumn.values()) {
-    bucket.sort(
-      (a, b) => a.sortKey[0] - b.sortKey[0] || a.sortKey[1] - b.sortKey[1] || compare(a.id, b.id),
-    )
-    bucket.forEach((node, index) => {
-      node.row = index
-    })
-  }
+  assignSlots(nodes, parentsOf(announced, drawn))
 
-  // 8. routes and lanes, which need every node's column and every edge at once.
+  // 8. routes and lanes, which need every node's depth and every edge at once.
   //
   // ranking marked its cycle-breaks on the announced edges, so carry that across to the drawn
   // ones by id: a drawn edge is always one of the announced pairs, and the two must agree or an
@@ -205,13 +193,13 @@ export function buildGraph(
     edge.backEdge = announced.get(edge.id)?.backEdge ?? false
   }
 
-  const columnOf = new Map<string, number>(nodes.map((node) => [node.id, node.column]))
+  const nodeDepth = new Map<string, number>(nodes.map((node) => [node.id, node.depth]))
   const routeOf = new Map<string, EdgeRoute>()
   for (const edge of drawn.values()) {
-    const reach = (columnOf.get(edge.target) ?? 0) - (columnOf.get(edge.source) ?? 0)
+    const reach = (nodeDepth.get(edge.target) ?? 0) - (nodeDepth.get(edge.source) ?? 0)
     routeOf.set(edge.id, edge.backEdge ? 'loop' : reach > 1 ? 'hop' : 'chain')
   }
-  const laneOf = packLanes([...drawn.values()], routeOf, columnOf)
+  const laneOf = packLanes([...drawn.values()], routeOf, nodeDepth)
 
   // 9. shares. an edge is measured against the applicants who reached the node it leaves, so it
   // reads "of the people who got this far, this fraction went that way" rather than "this
@@ -234,7 +222,7 @@ export function buildGraph(
       route: routeOf.get(edge.id) ?? 'chain',
       lane: laneOf.get(edge.id) ?? 0,
     })),
-    columns: nodes.length === 0 ? 0 : Math.max(...nodes.map((node) => node.column)) + 1,
+    depths: nodes.length === 0 ? 0 : Math.max(...nodes.map((node) => node.depth)) + 1,
   }
 }
 
@@ -305,11 +293,119 @@ function bump(edges: Map<string, Edge>, source: string, target: string): void {
   }
 }
 
-// arcs are packed by interval-graph colouring. an arc occupies the whole span of columns between
+// which edges get a say in where a node sits across its row. a stage node's are the announced
+// edges ranking itself used, minus the ones it held aside as cycle-breaks - order the layout by
+// what applicants were told rather than by how far along they are and it stays still while they
+// advance, which is the same reason the depths are ranked on announced. an outcome has no
+// announced pair at all, since announced is built from stage lists, so it takes its drawn edges
+// instead: those are the only record of who ended where
+function parentsOf(announced: Map<string, Edge>, drawn: Map<string, Edge>): Map<string, Edge[]> {
+  const parents = new Map<string, Edge[]>()
+  const add = (edge: Edge): void => {
+    const list = parents.get(edge.target)
+    if (list === undefined) {
+      parents.set(edge.target, [edge])
+    } else {
+      list.push(edge)
+    }
+  }
+
+  for (const edge of announced.values()) {
+    if (!edge.backEdge) {
+      add(edge)
+    }
+  }
+  for (const edge of drawn.values()) {
+    if (!announced.has(edge.id)) {
+      add(edge)
+    }
+  }
+  return parents
+}
+
+interface Parent {
+  slot: number
+  source: string
+  weight: number
+}
+
+// heaviest wins, and the parent's own slot and then its id only settle a tie - so which parent a
+// node hangs under can never depend on the order the applicants came back in
+function beats(candidate: Parent, best: Parent): boolean {
+  return (
+    candidate.weight - best.weight ||
+    best.slot - candidate.slot ||
+    compare(candidate.source, best.source)
+  ) > 0
+}
+
+// a node sits under the parent that feeds it, so a branch stays in one block and its lines do not
+// cross the next branch's. that is the whole reason this is not a plain sort: ordering a row by
+// the stages endpoint alone puts a child wherever its own stage happens to rank, which has nothing
+// to do with who points at it, and two forks then swap over each other on the way down.
+//
+// one pass down the depths is enough. every edge that counts here runs to a strictly greater
+// depth - that is what the longest-path ranking guarantees, and outcomes are pinned below every
+// stage - so a parent always has its slot before its children are ordered.
+//
+// a node with several parents goes under the heaviest, which is the transition most applicants
+// recorded. a root, and anything only a cycle-break points at, has no parent to sit under and
+// falls back to sortKey; so do the children of one parent, which is what keeps a fork in stage
+// order and the layout identical however the applicants were sorted
+function assignSlots(nodes: Ranked[], parents: Map<string, Edge[]>): void {
+  const byDepth = new Map<number, Ranked[]>()
+  for (const node of nodes) {
+    const bucket = byDepth.get(node.depth)
+    if (bucket === undefined) {
+      byDepth.set(node.depth, [node])
+    } else {
+      bucket.push(node)
+    }
+  }
+
+  const slotOf = new Map<string, number>()
+  // the slot of the parent a node hangs under, or -1 for one that hangs under nothing. a parent
+  // whose own slot is not settled yet is not a candidate: it is at this depth or below, so it is
+  // a cycle-break or an edge into a node ranking could not place, and neither can position anyone
+  const under = (node: Ranked): number => {
+    let best: Parent | null = null
+    for (const edge of parents.get(node.id) ?? []) {
+      const slot = slotOf.get(edge.source)
+      if (slot === undefined) {
+        continue
+      }
+      const candidate = { slot, source: edge.source, weight: edge.weight }
+      if (best === null || beats(candidate, best)) {
+        best = candidate
+      }
+    }
+    return best?.slot ?? -1
+  }
+
+  for (const depth of [...byDepth.keys()].sort((a, b) => a - b)) {
+    const bucket = byDepth.get(depth) ?? []
+    // every key is taken before any slot at this depth is written, so a node can never be
+    // positioned by a sibling that happens to have been ordered first
+    const key = new Map(bucket.map((node) => [node.id, under(node)]))
+    bucket.sort(
+      (a, b) =>
+        (key.get(a.id) ?? -1) - (key.get(b.id) ?? -1) ||
+        a.sortKey[0] - b.sortKey[0] ||
+        a.sortKey[1] - b.sortKey[1] ||
+        compare(a.id, b.id),
+    )
+    bucket.forEach((node, index) => {
+      node.slot = index
+      slotOf.set(node.id, index)
+    })
+  }
+}
+
+// arcs are packed by interval-graph colouring. an arc occupies the whole span of depths between
 // its endpoints, so two arcs in the same band whose spans overlap must not share a lane or they
-// are drawn one on top of the other. sorting by left edge and taking the lowest free lane is the
-// standard greedy partition, and it needs every arc at once - which is why lanes are settled here,
-// beside the columns they are derived from, rather than in the renderer.
+// are drawn one on top of the other. sorting by the shallower end and taking the lowest free lane
+// is the standard greedy partition, and it needs every arc at once - which is why lanes are
+// settled here, beside the depths they are derived from, rather than in the renderer.
 //
 // keying a lane on the span's *length* instead is the obvious shortcut and it cannot work: two
 // arcs of equal length get the same lane by definition, so a staircase of equal-length hops - and
@@ -318,13 +414,13 @@ function bump(edges: Map<string, Edge>, source: string, target: string): void {
 function packLanes(
   all: Edge[],
   routeOf: Map<string, EdgeRoute>,
-  columnOf: Map<string, number>,
+  depthOf: Map<string, number>,
 ): Map<string, number> {
   const spans = all
     .filter((edge) => routeOf.get(edge.id) !== 'chain')
     .map((edge) => {
-      const source = columnOf.get(edge.source) ?? 0
-      const target = columnOf.get(edge.target) ?? 0
+      const source = depthOf.get(edge.source) ?? 0
+      const target = depthOf.get(edge.target) ?? 0
       return {
         id: edge.id,
         band: routeOf.get(edge.id) as EdgeRoute,
@@ -332,8 +428,8 @@ function packLanes(
         right: Math.max(source, target),
       }
     })
-    // by left edge, then widest first: the greedy partition's order. the id only breaks the
-    // remaining ties, so that the packing is the same however the applicants were sorted
+    // by the shallower end, then widest first: the greedy partition's order. the id only breaks
+    // the remaining ties, so that the packing is the same however the applicants were sorted
     .sort((a, b) => a.left - b.left || b.right - a.right || compare(a.id, b.id))
 
   const placed: (typeof spans[number] & { lane: number })[] = []
@@ -345,7 +441,7 @@ function packLanes(
         (other) =>
           other.band === span.band &&
           other.lane === chosen &&
-          // touching at a single column is not a clash: the two arcs meet that node at opposite
+          // touching at a single depth is not a clash: the two arcs meet that node at opposite
           // handles, so one run ends before the other begins
           Math.min(other.right, span.right) > Math.max(other.left, span.left),
       )
@@ -392,7 +488,7 @@ function rankStages(
   // THE TIE-BREAK, and it is load-bearing. without it, which edge of a cycle gets left out of
   // ranking depends on traversal order, which follows the applicants list sorted by userId - so
   // one outlier could outrank a transition eight people recorded, and the whole layout would
-  // mirror if somebody renamed themselves. exploring the heaviest edge first means the consensus
+  // flip if somebody renamed themselves. exploring the heaviest edge first means the consensus
   // ordering lays the graph out, every run. both edges are still drawn, and drawn the same
   for (const list of outgoing.values()) {
     list.sort((a, b) => {
@@ -460,12 +556,12 @@ function rankStages(
   for (const edge of ranked) {
     indegree.set(edge.target, (indegree.get(edge.target) ?? 0) + 1)
   }
-  const column = new Map<string, number>(ids.map((id) => [id, 0]))
+  const depth = new Map<string, number>(ids.map((id) => [id, 0]))
   const queue = ids.filter((id) => indegree.get(id) === 0)
   while (queue.length > 0) {
     const id = queue.shift()!
     for (const edge of ranked.filter((candidate) => candidate.source === id)) {
-      column.set(edge.target, Math.max(column.get(edge.target) ?? 0, (column.get(id) ?? 0) + 1))
+      depth.set(edge.target, Math.max(depth.get(edge.target) ?? 0, (depth.get(id) ?? 0) + 1))
       const remaining = (indegree.get(edge.target) ?? 0) - 1
       indegree.set(edge.target, remaining)
       if (remaining === 0) {
@@ -474,5 +570,5 @@ function rankStages(
     }
   }
 
-  return column
+  return depth
 }

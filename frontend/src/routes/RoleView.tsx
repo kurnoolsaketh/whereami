@@ -151,6 +151,7 @@ export function RoleView() {
               <PipelineGraph
                 nodes={graph.nodes}
                 edges={graph.edges}
+                depths={graph.depths}
                 selected={selected}
                 onSelect={setSelected}
               />

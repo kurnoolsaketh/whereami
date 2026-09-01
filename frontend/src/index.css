@@ -473,7 +473,9 @@ main:has(.role-view) {
 }
 
 .graph {
-  height: 26rem;
+  /* the component sets --graph-height from how deep the graph is, so a long pipeline gets room
+     rather than being scaled down into a fixed box. the fallback is the height it always had */
+  height: var(--graph-height, 26rem);
   margin-top: 0.75rem;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -564,7 +566,7 @@ main:has(.role-view) {
   border-radius: 6px;
 }
 
-/* an outcome is a result, not a round to walk through, so the final column reads as an ending
+/* an outcome is a result, not a round to walk through, so the last row reads as an ending
    at a glance rather than as more of the same */
 .graph-outcome {
   border-radius: 999px;

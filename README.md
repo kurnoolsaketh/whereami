@@ -59,8 +59,9 @@ two applicants on one role without needing two browsers.
 
 ### The role view
 
-The graph merges every stage ordering anyone recorded for that role into one picture. Clicking a
-line explains it in the top-left corner, showing that line's own numbers in a sample chip.
+The graph merges every stage ordering anyone recorded for that role into one picture, read from
+Applied **downwards**. Clicking a line explains it in the top-left corner, showing that line's own
+numbers in a sample chip.
 
 - A node is a **(stage, occurrence)** pair, so someone's second technical round is a
   different node from their first. A stage is numbered only if the role spans more than one
@@ -76,17 +77,23 @@ line explains it in the top-left corner, showing that line's own numbers in a sa
   **thickness** tracks that share. So the edges leaving a node account for exactly the people who
   got there: each of them either moved on, ended there, or is standing on it and counted in the
   badge.
+- A round sits **under the round that leads to it**, so a branch stays in one block instead of
+  crossing the branch beside it. Where several rounds lead to the same one it hangs under the
+  heaviest of them — the transition most applicants recorded.
 - The graph is **directed and may contain cycles**: a role that sends someone back for another
-  round after a technical one is a real shape, not a mistake by whoever recorded it. Laying the
-  columns out still needs an acyclic graph, so one edge of each cycle is held out of the
+  round after a technical one is a real shape, not a mistake by whoever recorded it. Ranking the
+  rows still needs an acyclic graph, so one edge of each cycle is held out of the
   ranking — chosen by weight, so one outlier cannot reorder the graph — but it is drawn like
-  every other edge, arcing under the chain so it stays visible. Arrowheads carry the direction.
-- An edge that reaches past the next column **arcs over** the nodes in between rather than
-  cutting through them, and arcs are stacked into lanes so that two which overlap are never
-  drawn on top of each other. Labels sit beside their line, not on it.
-- The **final column** holds outcomes rather than rounds. Their placement asserts nothing
+  every other edge, arcing back up the left so it stays visible. Arrowheads carry the direction.
+- An edge that reaches past the next row **arcs down the right** of the nodes in between rather
+  than cutting through them, and arcs are stacked into lanes so that two which overlap are never
+  drawn on top of each other.
+- The **last row** holds outcomes rather than rounds. Their placement asserts nothing
   about when people fall out — the edge weights carry that. An outcome nobody holds is not
   drawn at all.
+- The panel **grows with the pipeline**, up to a point: a role with a few rounds is as compact as
+  ever, a long one gets the height instead of being scaled down, and beyond that it pans and
+  zooms.
 
 ### Stage and status are two different things
 
