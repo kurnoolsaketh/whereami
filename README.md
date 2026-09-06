@@ -88,6 +88,9 @@ numbers in a sample chip.
 - An edge that reaches past the next row **arcs down the right** of the nodes in between rather
   than cutting through them, and arcs are stacked into lanes so that two which overlap are never
   drawn on top of each other.
+- **No two lines are ever drawn along the same line.** Each one leaves a node at its own point on
+  the border and travels in a lane nothing else is using, so lines cross — which a merged pipeline
+  really does — but never lie on top of each other, where two counts would look like one.
 - The **last row** holds outcomes rather than rounds. Their placement asserts nothing
   about when people fall out — the edge weights carry that. An outcome nobody holds is not
   drawn at all.

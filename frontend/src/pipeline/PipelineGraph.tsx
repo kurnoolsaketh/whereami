@@ -4,7 +4,6 @@ import {
   BaseEdge,
   Controls,
   EdgeText,
-  getSmoothStepPath,
   Handle,
   Panel,
   Position,
@@ -26,19 +25,32 @@ import {
   type GraphNode,
   type Selection,
 } from './graph'
+import {
+  ARC_LANE,
+  BAND_START,
+  SIDE_PORT_SPACING,
+  CHAIN_TRACK,
+  CHAIN_TRACK_START,
+  pathFrom,
+  portPoint,
+  PORT_SPACING,
+  trackOf,
+  waypoints,
+  type Layout,
+  type Point,
+} from './edgePath'
 import { endingVerb } from './status'
 import { nodeKey } from './stages'
 
-// graph.ts already assigned every node a depth and a slot, so there is no layout engine here -
-// React Flow is only asked to draw. depth reads down the screen and slots spread across it. the
-// spacing is generous because React Flow routes an edge as a spline between two handles rather
-// than around whatever sits in between, so a transition that skips several depths needs room to
-// arc clear of the nodes it passes.
+// graph.ts already assigned every node a depth and a slot, and every edge a lane and two ports,
+// so there is no layout engine here - React Flow is only asked to draw. depth reads down the
+// screen and slots spread across it, and the sideways room is generous because an edge that skips
+// a row travels in a gutter beside its slot rather than through the boxes in between.
 //
-// how wide one slot is before its arc bands are added. a node's width comes from its label and
-// nothing has been measured at the moment positions are handed over, so this is an allowance for
-// the longest stage name plus the air beside it, not a measurement
-const SLOT_WIDTH = 220
+// how far into a slot a node may reach before it meets that gutter. a node's width comes from its
+// label and nothing has been measured at the moment positions are handed over, so this is an
+// allowance for the longest stage name, not a measurement
+const SLOT_BAND = 230
 
 // one colour for the line and its arrowhead. the line takes it from the stylesheet and the
 // marker has to be told, because an SVG marker is filled by attribute, so both name the same var
@@ -67,73 +79,103 @@ const ARROW_LENGTH = 9
 const ARROW_HALF_WIDTH = 3.6
 const ARROW_PER_STROKE = 0.75
 
-// the pitch between two depths, and unlike the one between two slots it is a plain constant:
-// nothing arcs between two rows, so a row needs room for a node and for the chip a chain edge
-// parks in the gap below it, and nothing else
+// a node is as tall as this unless its ports need more, and every node takes the same height so
+// that a row is a row
 const NODE_HEIGHT = 34
-const CHIP_HEIGHT = 19
-const DEPTH_GAP = 30
-const DEPTH_PITCH = NODE_HEIGHT + CHIP_HEIGHT + DEPTH_GAP
 
-// graph.ts hands every arc a lane index, packed so that no two overlapping arcs share one. all
-// that is left here is turning an index into a distance from the node's side, which is the one
-// part that has to know about pixels.
-//
-// lanes are spaced to fit a label, and the label an arc has to clear now sits beside it rather
-// than above it - a chip is about three times wider than it is tall, so a lane is wider than it
-// used to be deep. that room is the cheap one on this layout: fitView scales the graph on its
-// height now, and a role whose applicants all walked the same order takes none of these bands at
-// all and stays as narrow as it ever was
-const ARC_LANE = 34
-
-// roughly how wide a chip is - "12 · 100%" at the edge font. estimated from the glyph count
+// roughly how wide a label chip is - "12 · 100%" at the edge font. estimated from the glyph count
 // rather than measured through another render, the same way the legend estimates its own: the
-// exact width carries no meaning, it only has to be close enough to leave the arcs room
+// exact width carries no meaning, it only has to be close enough to leave the gutters room
 const CHIP_WIDTH = 56
+const CHIP_HEIGHT = 19
 
-// how far a label sits off its own line, across the line rather than along it.
-//
-// a chain edge needs none: it runs straight down through open space, and the gap below a node is
-// sized to hold its chip, so the chip sits on the line and interrupts it, the way an arc's always
-// has. this is the one thing the turn made simpler - laid out left to right, a chain label had to
-// clear the whole node row, because the chip was wider than the gap a name like "Hiring Manager
-// Screen" left beside it and it covered the line and the arrowhead both.
-//
-// an arc's does lift, outward from the node, because lane 0 hugs the node's side closely enough
-// that a chip centred on it would lie over the box
-const ARC_LABEL_LIFT = 18
+// roughly the narrowest a node with a label gets - "Onsite" and "Offer" are about this wide. only
+// the fit uses it, to guess how much of the last slot its nodes leave to the gutter beside them
+const NARROW_NODE = 80
 
-// where each band starts, measured out from the node's side. nothing is parked out here for the
-// first lane to clear any more - a chain edge's chip is below the node, not beside it - so an arc
-// only has to leave the node's own border
-const HOP_BAND_START = 14
-const LOOP_BAND_START = 14
+// the air a border leaves either side of its ports, and the room below the deepest track in a
+// channel - enough for the arrowhead that drops into the next row
+const PORT_PADDING = 14
+const SIDE_PORT_PADDING = 5
+const CHANNEL_GAP = 16
 
-// where along its run each lane parks its label. cycling through these by lane means two arcs
-// stacked a few pixels apart put their chips at different points, so neither covers the other
-const LABEL_STOPS = [0.5, 0.32, 0.68, 0.41, 0.59]
-
-function laneOffset(route: GraphEdge['route'], lane: number): number {
-  return (route === 'loop' ? LOOP_BAND_START : HOP_BAND_START) + lane * ARC_LANE
+// how much border a node needs to space out this many ports. one port sits at the middle and asks
+// for nothing, which is the common case and why most nodes are exactly as big as they always were
+function acrossBorder(ports: number): number {
+  return ports <= 1 ? 0 : (ports - 1) * PORT_SPACING + 2 * PORT_PADDING
 }
 
-// how much room the arcs actually need either side of a slot, and therefore how far apart the
-// slots have to sit. hops run down the right of a node and loops back up its left, so between two
-// neighbours the two bands sit end to end.
-//
-// the two widths are handed out as well as the pitch, because the fit needs them too: fitView
-// frames the *nodes*, and the outermost slots' bands hang outside that box - so without them the
-// arc running down the right of the last slot is cut off at the panel's edge
-function measureBands(edges: GraphEdge[]): { left: number; right: number; slotPitch: number } {
-  const lanes = { hop: 0, loop: 0 }
+function downBorder(ports: number): number {
+  return ports <= 1 ? 0 : (ports - 1) * SIDE_PORT_SPACING + 2 * SIDE_PORT_PADDING
+}
+
+// everything the drawing needs that depends on the graph as a whole: how wide a slot has to be to
+// hold the gutters beside it, how tall a row has to be to hold the tracks in the channel below
+// it, and how tall a node has to be to hold the ports on its sides. a role whose applicants all
+// walked the same order needs none of it and stays as compact as it ever was
+function measure(nodes: GraphNode[], edges: GraphEdge[]): Layout {
+  const arcs = { hop: 0, loop: 0 }
+  // one depth per channel: a row is only as tall as the jogs that travel underneath it, so a
+  // spine of straight chain edges costs nothing however crowded one other row happens to be
+  const jogs = new Map<number, number>()
+  const depthOf = new Map(nodes.map((node) => [node.id, node.depth]))
   for (const edge of edges) {
-    if (edge.route !== 'chain') {
-      lanes[edge.route] = Math.max(lanes[edge.route], edge.lane + 1)
+    if (edge.route === 'chain') {
+      const channel = depthOf.get(edge.source) ?? 0
+      jogs.set(channel, Math.max(jogs.get(channel) ?? 0, edge.lane + 1))
+    } else {
+      arcs[edge.route] = Math.max(arcs[edge.route], edge.lane + 1)
     }
   }
-  const right = lanes.hop === 0 ? 0 : laneOffset('hop', lanes.hop - 1) + CHIP_WIDTH / 2
-  const left = lanes.loop === 0 ? 0 : laneOffset('loop', lanes.loop - 1) + CHIP_WIDTH / 2
-  return { left, right, slotPitch: SLOT_WIDTH + right + left }
+
+  const nodeHeight = Math.max(NODE_HEIGHT, downBorder(Math.max(0, ...nodes.map((n) => n.downPorts))))
+  const gutter = (deep: number): number =>
+    deep === 0 ? 0 : BAND_START + deep * ARC_LANE + CHIP_WIDTH / 2
+  const gutters = { left: gutter(arcs.loop), right: gutter(arcs.hop) }
+
+  const rows = Math.max(0, ...nodes.map((node) => node.depth)) + 1
+  const rowTop: number[] = []
+  let y = 0
+  for (let depth = 0; depth < rows; depth += 1) {
+    rowTop.push(y)
+    // the channel below this row: its tracks, the chip a label parks on one of them, and room for
+    // the arrowhead that drops into the next row
+    y += nodeHeight + CHAIN_TRACK_START + (jogs.get(depth) ?? 0) * CHAIN_TRACK + CHANNEL_GAP
+  }
+
+  return {
+    slotPitch: SLOT_BAND + gutters.left + gutters.right,
+    nodeHeight,
+    slotBand: SLOT_BAND,
+    rowTop,
+    gutters,
+  }
+}
+
+// how round an edge's corners are. enough that a short jog between two nodes of different widths
+// reads as a curve rather than as two turns
+const CORNER = 8
+
+// where along its longest leg each lane parks its label. cycling through these by lane means two
+// arcs running a gutter apart put their chips at different heights, so neither covers the other -
+// which matters more than it used to, because a lane is now narrower than a chip is wide
+const LABEL_STOPS = [0.5, 0.32, 0.68, 0.41, 0.59]
+
+// the point a label sits at: along the edge's longest leg, which is the one with room for it.
+// for the common straight chain edge that is the whole line, and the chip lands in the channel
+function labelPoint(points: Point[], at: number): Point {
+  let best = { length: -1, from: points[0], to: points[0] }
+  for (let i = 0; i + 1 < points.length; i += 1) {
+    const [from, to] = [points[i], points[i + 1]]
+    const length = Math.abs(to.x - from.x) + Math.abs(to.y - from.y)
+    if (length > best.length) {
+      best = { length, from, to }
+    }
+  }
+  return {
+    x: best.from.x + (best.to.x - best.from.x) * at,
+    y: best.from.y + (best.to.y - best.from.y) * at,
+  }
 }
 
 // which pair of handles each route leaves and arrives by. everything else about an edge - colour,
@@ -157,17 +199,15 @@ const ROUTES = {
 
 interface EdgeData extends Record<string, unknown> {
   label: string
-  // the smoothstep offset for an arc: how far off the node it runs before turning. undefined for
-  // a chain edge, which takes the library's default
-  lane: number | undefined
-  // signed, because a label sits to the right of a hop and to the left of a loop - each on the
-  // open side of its own arc
-  lift: number
-  // where along the edge the label sits, 0..1 from source to target. arcs in neighbouring lanes
-  // are only a lane apart across the run, which is less than a chip is wide, so if every one of
-  // them centred its label the chips would pile up on each other; sliding them apart down the run
-  // keeps each one beside its own line. undefined leaves the label at the path's own midpoint
-  labelAt: number | undefined
+  // everything the path is built from. the route decides its shape, the two ports decide where it
+  // leaves and arrives along the borders it meets, and the track is the one line it does its
+  // sideways travel on - the line graph.ts reserved for it, which nothing else is using
+  route: GraphEdge['route']
+  sourcePort: number
+  targetPort: number
+  track: number
+  // where along its longest leg the label sits, 0..1
+  labelAt: number
   // pointed at or picked. one flag, because both mean the same thing to a reader - this is the
   // line you are asking about - and only their persistence differs
   lit: boolean
@@ -176,6 +216,9 @@ interface EdgeData extends Record<string, unknown> {
 interface NodeData extends Record<string, unknown> {
   label: string
   count: number
+  // the border length this node's ports need, and the height every node in the graph takes
+  minWidth: number
+  height: number
   dimmed: boolean
   picked: boolean
 }
@@ -236,14 +279,14 @@ function Flow({ nodes, edges, depths, selected, onSelect }: PipelineGraphProps) 
   const pickedSource = nodes.find((node) => node.id === picked?.source)
   const pickedTarget = nodes.find((node) => node.id === picked?.target)
 
-  // the slots have to know how wide the arc bands are, and the arcs have to know their own lane,
-  // so both are measured once from the edges and shared
-  const bands = useMemo(() => measureBands(edges), [edges])
+  // the rows, the slots and the nodes are all sized from the same measurement, taken once
+  const layout = useMemo(() => measure(nodes, edges), [nodes, edges])
 
   // the panel grows with the graph instead of scaling it into a fixed box: a role with three
   // rounds looks exactly as it did, and one with ten gets the room rather than being shrunk to
   // fit. past the cap it pans and zooms, as it always has
-  const height = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, depths * DEPTH_PITCH + 2 * FIT_PADDING))
+  const drawnHeight = (layout.rowTop[depths - 1] ?? 0) + layout.nodeHeight
+  const height = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, drawnHeight + 2 * FIT_PADDING))
 
   // both fits take these - the prop's and FitOnMeasure's - so the object has to keep its identity
   // between renders, and it reserves the arc bands beside the outermost slots on top of the plain
@@ -253,11 +296,18 @@ function Flow({ nodes, edges, depths, selected, onSelect }: PipelineGraphProps) 
       padding: {
         top: px(FIT_PADDING),
         bottom: px(FIT_PADDING),
-        left: px(FIT_PADDING + bands.left),
-        right: px(FIT_PADDING + bands.right),
+        // fitView frames the nodes, and the outermost gutters hang outside that box, so without
+        // this the arcs running down them are cut off at the panel's edge. only what actually
+        // hangs over is reserved: on the left that is the loop gutter, which starts at the first
+        // slot's edge; on the right it is the hop gutter plus however much of the slot its nodes
+        // leave empty, which is the slot's allowance less the narrowest a labelled node gets
+        left: px(FIT_PADDING + layout.gutters.left),
+        right: px(
+          FIT_PADDING + Math.max(layout.gutters.right, layout.slotBand + layout.gutters.right - NARROW_NODE),
+        ),
       },
     }),
-    [bands.left, bands.right],
+    [layout.gutters, layout.slotBand],
   )
 
   const flowNodes = useMemo<Node<NodeData>[]>(
@@ -265,10 +315,14 @@ function Flow({ nodes, edges, depths, selected, onSelect }: PipelineGraphProps) 
       nodes.map((node) => ({
         id: node.id,
         type: node.kind,
-        position: { x: node.slot * bands.slotPitch, y: node.depth * DEPTH_PITCH },
+        position: { x: node.slot * layout.slotPitch, y: layout.rowTop[node.depth] ?? 0 },
         data: {
           label: node.label,
           count: node.count,
+          // a border has to be long enough to space its ports out, and every node takes the same
+          // height so that a row reads as a row
+          minWidth: acrossBorder(node.acrossPorts),
+          height: layout.nodeHeight,
           // only a node selection dims the others; picking a line lights the line and leaves the
           // rounds alone, since every round it touches is still part of what you are looking at
           dimmed: selected?.kind === 'node' && selected.id !== node.id,
@@ -277,7 +331,7 @@ function Flow({ nodes, edges, depths, selected, onSelect }: PipelineGraphProps) 
         draggable: false,
         connectable: false,
       })),
-    [nodes, selected, bands.slotPitch],
+    [nodes, selected, layout],
   )
 
   // which line the pointer is on. this is React state rather than a CSS :hover rule because a lit
@@ -286,33 +340,40 @@ function Flow({ nodes, edges, depths, selected, onSelect }: PipelineGraphProps) 
   const [hovered, setHovered] = useState<string | null>(null)
 
   const flowEdges = useMemo<Edge[]>(() => {
+    const at = new Map(nodes.map((node) => [node.id, node]))
     return edges.map((edge) => {
-        const route = edge.route
-        const strokeWidth = MIN_WIDTH + (MAX_WIDTH - MIN_WIDTH) * edge.share
-        const lit = hovered === edge.id || (selected?.kind === 'edge' && selected.id === edge.id)
+      const strokeWidth = MIN_WIDTH + (MAX_WIDTH - MIN_WIDTH) * edge.share
+      const lit = hovered === edge.id || (selected?.kind === 'edge' && selected.id === edge.id)
+      const source = at.get(edge.source)
+      const target = at.get(edge.target)
 
-
-        return {
-          id: edge.id,
-          source: edge.source,
-          target: edge.target,
-          type: 'pipeline',
-          ...ROUTES[route],
-          data: {
-            label: edgeLabel(edge),
-            lane:
-              route === 'chain' ? undefined : laneOffset(route, edge.lane),
-            lift: route === 'chain' ? 0 : route === 'loop' ? -ARC_LABEL_LIFT : ARC_LABEL_LIFT,
-            labelAt: route === 'chain' ? undefined : LABEL_STOPS[edge.lane % LABEL_STOPS.length],
-            lit,
-          } satisfies EdgeData,
-          style: { strokeWidth, ...(lit ? { stroke: EDGE_PICKED_COLOUR } : {}) },
-          // above every other line, so a lit one is never left under an arc that crosses it
-          zIndex: lit ? 1 : 0,
-          ariaLabel: `${edge.weight} of the applicants on this role, ${sharePercent(edge)} percent, have this step in their pipeline`,
-        }
+      return {
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        type: 'pipeline',
+        ...ROUTES[edge.route],
+        data: {
+          label: edgeLabel(edge),
+          route: edge.route,
+          sourcePort: edge.sourcePort,
+          targetPort: edge.targetPort,
+          // the line this edge travels sideways on. laid out from the model rather than from the
+          // measured boxes, so it is the same line graph.ts packed the tracks against
+          track:
+            source === undefined || target === undefined
+              ? 0
+              : trackOf(edge, source, target, layout),
+          labelAt: LABEL_STOPS[edge.lane % LABEL_STOPS.length],
+          lit,
+        } satisfies EdgeData,
+        style: { strokeWidth, ...(lit ? { stroke: EDGE_PICKED_COLOUR } : {}) },
+        // above every other line, so a lit one is never left under an arc that crosses it
+        zIndex: lit ? 1 : 0,
+        ariaLabel: `${edge.weight} of the applicants on this role, ${sharePercent(edge)} percent, have this step in their pipeline`,
+      }
     })
-  }, [edges, hovered, selected])
+  }, [nodes, edges, hovered, selected, layout])
 
   return (
     <div className="graph" style={{ '--graph-height': px(height) } as CSSProperties}>
@@ -440,46 +501,24 @@ function Legend({ edge, source, target }: { edge: GraphEdge; source: string; tar
 
 // a round somebody walks through, with the number of people standing there now.
 //
-// the two Right handles, and the two Left ones, would otherwise be coincident anchors at the
-// middle of their edge, so each is nudged to the end its traffic comes from: hops run downward, so
-// they leave low on the right edge and arrive high on it, and loops run back upward, so they do
-// the opposite on the left. that keeps both families of arc monotone instead of doubling back on
-// themselves at the ends
+// the handles sit at the middle of their borders and every edge that meets one slides along to
+// its own port from there, so a pair on the same border is no longer two nudged anchors trying to
+// keep two families of arc apart - the ports do that, and they do it for every edge rather than
+// for two groups of them.
+//
+// the box takes its size from those ports: a border has to be long enough to hold them, and every
+// node takes the same height so that a row of them lines up
 function StageNode({ data }: NodeProps<Node<NodeData>>) {
   return (
-    <div className={nodeClass('graph-stage', data)}>
+    <div className={nodeClass('graph-stage', data)} style={sizeOf(data)}>
       <Handle type="target" position={Position.Top} id="in" isConnectable={false} />
-      <Handle
-        type="target"
-        position={Position.Right}
-        id="hop-in"
-        style={{ top: '30%' }}
-        isConnectable={false}
-      />
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="hop-out"
-        style={{ top: '70%' }}
-        isConnectable={false}
-      />
+      <Handle type="target" position={Position.Right} id="hop-in" isConnectable={false} />
+      <Handle type="source" position={Position.Right} id="hop-out" isConnectable={false} />
       <span className="graph-label">{data.label}</span>
       {data.count > 0 && <span className="graph-count">{data.count}</span>}
       <Handle type="source" position={Position.Bottom} id="out" isConnectable={false} />
-      <Handle
-        type="source"
-        position={Position.Left}
-        id="loop-out"
-        style={{ top: '30%' }}
-        isConnectable={false}
-      />
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="loop-in"
-        style={{ top: '70%' }}
-        isConnectable={false}
-      />
+      <Handle type="source" position={Position.Left} id="loop-out" isConnectable={false} />
+      <Handle type="target" position={Position.Left} id="loop-in" isConnectable={false} />
     </div>
   )
 }
@@ -488,32 +527,34 @@ function StageNode({ data }: NodeProps<Node<NodeData>>) {
 // to walk through - the last row should read as an ending at a glance
 function OutcomeNode({ data }: NodeProps<Node<NodeData>>) {
   return (
-    <div className={nodeClass('graph-outcome', data)}>
+    <div className={nodeClass('graph-outcome', data)} style={sizeOf(data)}>
       {/* an outcome has no outgoing edges, so it can never be an ancestor and never a loop's
           target; and it sits below every stage, so an edge into it is a chain step or a hop
           and never a loop. two inbound handles is all it needs */}
       <Handle type="target" position={Position.Top} id="in" isConnectable={false} />
-      <Handle
-        type="target"
-        position={Position.Right}
-        id="hop-in"
-        style={{ top: '30%' }}
-        isConnectable={false}
-      />
+      <Handle type="target" position={Position.Right} id="hop-in" isConnectable={false} />
       <span className="graph-label">{data.label}</span>
       {data.count > 0 && <span className="graph-count">{data.count}</span>}
     </div>
   )
 }
 
-// the whole reason this is a custom edge rather than a built-in 'smoothstep': the built-ins draw
-// their label at the labelX/labelY the path function returns - the middle of the line - and expose
-// labelStyle and labelBgPadding but no way to move it off. so the path is computed here and the
-// label placed beside it instead of on it
+// a node is as wide as its label unless its ports need more, and always the height the row was
+// measured at. React Flow reads the box back out of the DOM, so the handles follow
+function sizeOf(data: NodeData): CSSProperties {
+  return { minWidth: data.minWidth, height: data.height }
+}
+
+// the whole reason this is a custom edge rather than a built-in 'smoothstep': a built-in bends
+// where it likes. every edge leaving a node used to share the same run for as long as they all
+// happened to agree, which is where every overlapping line in the picture came from - and the
+// built-ins draw their label at the middle of the line and expose no way to move it off.
+//
+// so the path is built here from the corners edgePath works out: out of this edge's own port,
+// along the one track reserved for it, and in to its own port at the other end
 function PipelineEdge({
   sourceX,
   sourceY,
-  sourcePosition,
   targetX,
   targetY,
   targetPosition,
@@ -523,40 +564,41 @@ function PipelineEdge({
   const stroke = Number(style?.strokeWidth ?? MIN_WIDTH)
   const length = ARROW_LENGTH + ARROW_PER_STROKE * stroke
   const halfWidth = ARROW_HALF_WIDTH + ARROW_PER_STROKE * stroke
-  // the direction the edge is travelling as it arrives, which is fixed by the handle it arrives
+  // the direction the edge is travelling as it arrives, which is fixed by the border it arrives
   // at: a chain edge comes in from above, a hop arrives at the right, a loop at the left
   const [dx, dy] = APPROACH[targetPosition]
+  const route = data?.route ?? 'chain'
 
-  // the line stops where the head begins, so the two meet instead of overlapping
-  const [path, labelX, labelY] = getSmoothStepPath({
-    sourceX,
-    sourceY,
-    sourcePosition,
-    targetX: targetX - dx * length,
-    targetY: targetY - dy * length,
-    targetPosition,
-    ...(data?.lane === undefined ? {} : { offset: data.lane }),
-  })
+  // React Flow hands over the middle of each border; the port slides it along to this edge's own
+  // place on it
+  const from = portPoint({ x: sourceX, y: sourceY }, route, data?.sourcePort ?? 0)
+  const to = portPoint({ x: targetX, y: targetY }, route, data?.targetPort ?? 0)
+  const corners = waypoints({ route }, from, to, data?.track ?? 0)
+
+  // the line stops where the arrowhead begins, so the two meet instead of overlapping - but never
+  // short of the corner before it, which would leave the last leg pointing backwards
+  const last = corners[corners.length - 1]
+  const before = corners[corners.length - 2] ?? last
+  const room = Math.min(length, (Math.abs(last.x - before.x) + Math.abs(last.y - before.y)) * 0.9)
+  const drawn = [...corners.slice(0, -1), { x: last.x - dx * room, y: last.y - dy * room }]
+
   const head = [
-    [targetX, targetY],
-    [targetX - dx * length - dy * halfWidth, targetY - dy * length + dx * halfWidth],
-    [targetX - dx * length + dy * halfWidth, targetY - dy * length - dx * halfWidth],
+    [to.x, to.y],
+    [to.x - dx * length - dy * halfWidth, to.y - dy * length + dx * halfWidth],
+    [to.x - dx * length + dy * halfWidth, to.y - dy * length - dx * halfWidth],
   ]
     .map(([x, y]) => `${x},${y}`)
     .join(' ')
 
-  // the path's own midpoint, unless the edge asked for somewhere else along its run - which now
-  // means further down it, since every edge on this layout travels mostly downward
-  const y =
-    data?.labelAt === undefined ? labelY : sourceY + (targetY - sourceY) * data.labelAt
+  const label = labelPoint(corners, data?.labelAt ?? 0.5)
 
   return (
     <>
-      <BaseEdge path={path} style={style} />
+      <BaseEdge path={pathFrom(drawn, CORNER)} style={style} />
       <polygon points={head} fill={data?.lit ? EDGE_PICKED_COLOUR : EDGE_COLOUR} />
       <EdgeText
-        x={labelX + (data?.lift ?? 0)}
-        y={y}
+        x={label.x}
+        y={label.y}
         label={data?.label ?? ''}
         labelShowBg
         labelBgPadding={[6, 3]}

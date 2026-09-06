@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest'
 import type { Pipeline, Stage, Status } from '../api/types'
 import { buildGraph, edgeHolds, edgeLabel, nodeHolds } from './graph'
+import { bandSlot } from './edgePath'
 import { labelStages, nodeKey } from './stages'
 
 const STAGES: Stage[] = [
@@ -427,17 +428,19 @@ it('a drawn edge never rounds down to nobody', () => {
 })
 
 // arcs are laid out by interval-graph colouring, and this is the property that has to hold: two
-// arcs in the same band whose depth spans overlap must never share a lane, or they are drawn one
-// on top of the other. asserted as an invariant rather than on fixed numbers, because the numbers
+// arcs in one gutter whose depth spans overlap must never share a lane, or they are drawn one on
+// top of the other. asserted as an invariant rather than on fixed numbers, because the numbers
 // are exactly what a future layout change is allowed to move
 function arcsOverlapInALane(g: ReturnType<typeof graph>): string[] {
   const depthOf = new Map(g.nodes.map((node) => [node.id, node.depth]))
+  const slotOf = new Map(g.nodes.map((node) => [node.id, node.slot]))
   const arcs = g.edges
     .filter((edge) => edge.route !== 'chain')
     .map((edge) => {
       const a = depthOf.get(edge.source) ?? 0
       const b = depthOf.get(edge.target) ?? 0
-      return { edge, left: Math.min(a, b), right: Math.max(a, b) }
+      const gutter = bandSlot(edge.route, slotOf.get(edge.source) ?? 0, slotOf.get(edge.target) ?? 0)
+      return { edge, band: `${edge.route}@${gutter}`, left: Math.min(a, b), right: Math.max(a, b) }
     })
 
   const clashes: string[] = []
@@ -445,7 +448,7 @@ function arcsOverlapInALane(g: ReturnType<typeof graph>): string[] {
     for (let j = i + 1; j < arcs.length; j += 1) {
       const [a, b] = [arcs[i], arcs[j]]
       const overlaps = Math.min(a.right, b.right) > Math.max(a.left, b.left)
-      if (a.edge.route === b.edge.route && a.edge.lane === b.edge.lane && overlaps) {
+      if (a.band === b.band && a.edge.lane === b.edge.lane && overlaps) {
         clashes.push(`${a.edge.id} and ${b.edge.id} share lane ${a.edge.lane}`)
       }
     }

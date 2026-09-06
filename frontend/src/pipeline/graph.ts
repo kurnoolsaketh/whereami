@@ -1,4 +1,5 @@
 import type { Pipeline, Stage, Status } from '../api/types'
+import { bandSlot } from './edgePath'
 import { enumLabel, labelStages, nodeKey, stageKey } from './stages'
 import { isActive, statusLabel } from './status'
 
@@ -23,6 +24,11 @@ export interface GraphNode {
   // all the layout there is - the renderer turns it into pixels and decides nothing itself
   depth: number
   slot: number
+  // how many ports the busiest of this node's horizontal borders holds, and of its vertical ones.
+  // a node with five edges leaving its underside needs an underside wide enough to space five
+  // ports along, so the renderer turns these into a minimum size
+  acrossPorts: number
+  downPorts: number
 }
 
 export interface GraphEdge {
@@ -39,9 +45,18 @@ export interface GraphEdge {
   // of it and this says which - the renderer draws it as a loop rather than along the chain. it
   // is an ordering someone really recorded, drawn exactly like any other
   backEdge: boolean
-  // where this edge has to travel to stay visible, and which lane of its band it travels in
+  // where this edge has to travel to stay visible, and which lane of its band it travels in.
+  // a chain edge's lane is a track in the channel between its two rows, which it needs only if
+  // its two ports are not aligned; hops and loops take a lane in the side band they arc through
   route: EdgeRoute
   lane: number
+  // where along each node's border this edge attaches, in port slots either side of the border's
+  // centre. every edge on a border gets its own port, which is what stops two edges leaving one
+  // node from sharing a run: the old layout gave every edge on a side the same handle, so they
+  // were drawn on top of each other until they had to part, and every overlap in the picture was
+  // one of those. the renderer multiplies these by a spacing
+  sourcePort: number
+  targetPort: number
 }
 
 // 'chain' runs to the next depth and is drawn straight down; 'hop' reaches past it and arcs down
@@ -65,10 +80,11 @@ interface Ranked extends GraphNode {
   sortKey: [number, number]
 }
 
-// the three derived fields are missing here on purpose: none can be computed until every edge
-// exists, outcome edges included. share would otherwise put stage edges and outcome edges on two
-// different denominators, and a lane cannot be chosen without seeing every arc it might overlap
-type Edge = Omit<GraphEdge, 'share' | 'route' | 'lane'>
+// the derived fields are missing here on purpose: none can be computed until every edge exists,
+// outcome edges included. share would otherwise put stage edges and outcome edges on two
+// different denominators, a lane cannot be chosen without seeing every arc it might overlap, and
+// a port cannot be chosen without seeing every other edge that meets the same node
+type Edge = Omit<GraphEdge, 'share' | 'route' | 'lane' | 'sourcePort' | 'targetPort'>
 
 // `order` is GET /api/stages and `statusOrder` is GET /api/statuses. both are only used to make
 // the layout deterministic - which node sits beside which - never to decide what exists
@@ -169,6 +185,8 @@ export function buildGraph(
       count: counts.get(id) ?? 0,
       depth: depthOf.get(id) ?? 0,
       slot: 0,
+      acrossPorts: 0,
+      downPorts: 0,
       sortKey: [rankOf(stage, order), occurrence] as [number, number],
     })),
     ...[...held].map((status) => ({
@@ -178,6 +196,8 @@ export function buildGraph(
       count: counts.get(status) ?? 0,
       depth: maxStageDepth + 1,
       slot: 0,
+      acrossPorts: 0,
+      downPorts: 0,
       sortKey: [rankOf(status, statusOrder), 0] as [number, number],
     })),
   ]
@@ -199,7 +219,23 @@ export function buildGraph(
     const reach = (nodeDepth.get(edge.target) ?? 0) - (nodeDepth.get(edge.source) ?? 0)
     routeOf.set(edge.id, edge.backEdge ? 'loop' : reach > 1 ? 'hop' : 'chain')
   }
-  const laneOf = packLanes([...drawn.values()], routeOf, nodeDepth)
+  const nodeSlot = new Map<string, number>(nodes.map((node) => [node.id, node.slot]))
+  const laneOf = packLanes([...drawn.values()], routeOf, nodeDepth, nodeSlot)
+
+  // ports, which need the lanes (an arc's port is ordered by the lane it is heading for) and the
+  // slots (a chain edge's is ordered by where it is going sideways). every edge on a border gets
+  // its own, so no two edges leaving or arriving at one node share a run
+  const ports = assignPorts([...drawn.values()], routeOf, laneOf, nodeSlot, nodeDepth)
+  for (const node of nodes) {
+    const span = ports.spans.get(node.id)
+    node.acrossPorts = span?.across ?? 0
+    node.downPorts = span?.down ?? 0
+  }
+
+  // and the chain tracks: the channel between two rows carries every jog between them, and a jog
+  // is what a chain edge does whenever its two ports are not above each other - which is most of
+  // them, since a node spreads its outgoing edges along its underside
+  const trackOf = packChainTracks([...drawn.values()], routeOf, nodeSlot, nodeDepth)
 
   // 9. shares. an edge is measured against the applicants who reached the node it leaves, so it
   // reads "of the people who got this far, this fraction went that way" rather than "this
@@ -220,7 +256,12 @@ export function buildGraph(
       ...edge,
       share: share(edge.weight, edge.source),
       route: routeOf.get(edge.id) ?? 'chain',
-      lane: laneOf.get(edge.id) ?? 0,
+      lane:
+        routeOf.get(edge.id) === 'chain'
+          ? (trackOf.get(edge.id) ?? 0)
+          : (laneOf.get(edge.id) ?? 0),
+      sourcePort: ports.of.get(edge.id)?.source ?? 0,
+      targetPort: ports.of.get(edge.id)?.target ?? 0,
     })),
     depths: nodes.length === 0 ? 0 : Math.max(...nodes.map((node) => node.depth)) + 1,
   }
@@ -401,57 +442,236 @@ function assignSlots(nodes: Ranked[], parents: Map<string, Edge[]>): void {
   }
 }
 
-// arcs are packed by interval-graph colouring. an arc occupies the whole span of depths between
-// its endpoints, so two arcs in the same band whose spans overlap must not share a lane or they
-// are drawn one on top of the other. sorting by the shallower end and taking the lowest free lane
-// is the standard greedy partition, and it needs every arc at once - which is why lanes are
-// settled here, beside the depths they are derived from, rather than in the renderer.
+// the greedy interval-graph colouring both packers run: sort by the near end, widest first, and
+// take the lowest free level. two runs in one band may share a level only if their spans do not
+// overlap, or they are drawn one on top of the other. it needs every span at once, which is why
+// this cannot sit in the renderer.
 //
-// keying a lane on the span's *length* instead is the obvious shortcut and it cannot work: two
-// arcs of equal length get the same lane by definition, so a staircase of equal-length hops - and
-// that is exactly what consecutive stages produce - collapses onto one line however the constants
-// are tuned. hops and loops are packed separately because they are drawn in different bands
-function packLanes(
-  all: Edge[],
-  routeOf: Map<string, EdgeRoute>,
-  depthOf: Map<string, number>,
-): Map<string, number> {
-  const spans = all
-    .filter((edge) => routeOf.get(edge.id) !== 'chain')
-    .map((edge) => {
-      const source = depthOf.get(edge.source) ?? 0
-      const target = depthOf.get(edge.target) ?? 0
-      return {
-        id: edge.id,
-        band: routeOf.get(edge.id) as EdgeRoute,
-        left: Math.min(source, target),
-        right: Math.max(source, target),
-      }
-    })
-    // by the shallower end, then widest first: the greedy partition's order. the id only breaks
-    // the remaining ties, so that the packing is the same however the applicants were sorted
-    .sort((a, b) => a.left - b.left || b.right - a.right || compare(a.id, b.id))
+// the id only breaks the remaining ties, so that the packing is the same however the applicants
+// were sorted
+interface Span {
+  id: string
+  band: string
+  left: number
+  right: number
+}
 
-  const placed: (typeof spans[number] & { lane: number })[] = []
-  const lane = new Map<string, number>()
-  for (const span of spans) {
+function packSpans(spans: Span[]): Map<string, number> {
+  const sorted = [...spans].sort(
+    (a, b) => a.left - b.left || b.right - a.right || compare(a.id, b.id),
+  )
+
+  const placed: (Span & { level: number })[] = []
+  const level = new Map<string, number>()
+  for (const span of sorted) {
     let chosen = 0
     while (
       placed.some(
         (other) =>
           other.band === span.band &&
-          other.lane === chosen &&
-          // touching at a single depth is not a clash: the two arcs meet that node at opposite
-          // handles, so one run ends before the other begins
+          other.level === chosen &&
+          // touching at a single point is not a clash: the two runs meet there at opposite ends,
+          // so one finishes where the other begins
           Math.min(other.right, span.right) > Math.max(other.left, span.left),
       )
     ) {
       chosen += 1
     }
-    placed.push({ ...span, lane: chosen })
-    lane.set(span.id, chosen)
+    placed.push({ ...span, level: chosen })
+    level.set(span.id, chosen)
   }
-  return lane
+  return level
+}
+
+// an arc occupies the whole span of depths between its endpoints, so two arcs in the same band
+// whose spans overlap must not share a lane. a band is one slot's gutter: hops and loops run down
+// opposite sides of a slot, and two arcs in different slots' gutters are a whole slot apart and
+// so can share a lane freely. `bandSlot` decides which gutter an arc belongs to, and the renderer
+// asks it the same question when it places the arc - a second answer here is exactly how the two
+// would drift into drawing one arc on top of another.
+//
+// keying a lane on the span's *length* instead is the obvious shortcut and it cannot work: two
+// arcs of equal length get the same lane by definition, so a staircase of equal-length hops - and
+// that is exactly what consecutive stages produce - collapses onto one line however the constants
+// are tuned
+function packLanes(
+  all: Edge[],
+  routeOf: Map<string, EdgeRoute>,
+  depthOf: Map<string, number>,
+  slotOf: Map<string, number>,
+): Map<string, number> {
+  return packSpans(
+    all
+      .filter((edge) => routeOf.get(edge.id) !== 'chain')
+      .map((edge) => {
+        const route = routeOf.get(edge.id) as EdgeRoute
+        const source = depthOf.get(edge.source) ?? 0
+        const target = depthOf.get(edge.target) ?? 0
+        const gutter = bandSlot(route, slotOf.get(edge.source) ?? 0, slotOf.get(edge.target) ?? 0)
+        return {
+          id: edge.id,
+          band: `${route}@${gutter}`,
+          left: Math.min(source, target),
+          right: Math.max(source, target),
+        }
+      }),
+  )
+}
+
+// a chain edge runs to the row below and jogs sideways on the way whenever its two ports are not
+// aligned - the usual case, since a node with three edges leaving it spreads them along its
+// underside, and two nodes of different widths do not have their middles above each other
+// either. every jog between one pair of rows travels the same channel, so they are packed into
+// tracks exactly as the arcs are.
+//
+// a jog's span is the slots it crosses, and unlike an arc's it clashes even when two spans only
+// touch: an arc that reaches a slot meets it at a node's border and stops, but two jogs inside a
+// single slot are a few ports apart and would be handed the same track and drawn along the same
+// line. doubling the ends is what expresses that - [0,0] becomes [0,1], so two of them overlap,
+// while [0,0] and [1,1] become [0,1] and [2,3] and are free to share
+function packChainTracks(
+  all: Edge[],
+  routeOf: Map<string, EdgeRoute>,
+  slotOf: Map<string, number>,
+  depthOf: Map<string, number>,
+): Map<string, number> {
+  return packSpans(
+    all
+      .filter((edge) => routeOf.get(edge.id) === 'chain')
+      .map((edge) => {
+        const source = slotOf.get(edge.source) ?? 0
+        const target = slotOf.get(edge.target) ?? 0
+        return {
+          // one channel per pair of rows: a jog can only be in the way of another jog between the
+          // same two
+          id: edge.id,
+          band: `chain@${depthOf.get(edge.source) ?? 0}`,
+          left: 2 * Math.min(source, target),
+          right: 2 * Math.max(source, target) + 1,
+        }
+      }),
+  )
+}
+
+// which border an edge meets a node on, which follows from its route: the chain runs downward, so
+// it leaves an underside and arrives at a top; a hop arcs down the right of the graph, so both of
+// its ends are on right borders; a loop comes back up the left
+type Border = 'top' | 'right' | 'bottom' | 'left'
+
+function borderOf(route: EdgeRoute, end: 'source' | 'target'): Border {
+  if (route === 'chain') {
+    return end === 'source' ? 'bottom' : 'top'
+  }
+  return route === 'hop' ? 'right' : 'left'
+}
+
+interface Ports {
+  of: Map<string, { source: number; target: number }>
+  spans: Map<string, { across: number; down: number }>
+}
+
+// every edge that meets a node gets its own point along the border it meets it on, so that no two
+// edges leaving or arriving at one node share a run. that is where every overlap in the previous
+// layout came from: all the chain edges left through one handle at the middle of the underside
+// and all the hops through one on the right, so a node with three edges leaving it drew three
+// lines along the same stub and they only parted company where they had to.
+//
+// the order along a border is chosen so the ports do not tangle among themselves:
+//
+//   - an underside orders its edges by where they are going sideways, so the one heading furthest
+//     right leaves from the furthest right; a top border does the same by where its edges came
+//     from.
+//   - a side border carries two families travelling opposite ways - hops arrive from above and
+//     leave downward, loops the reverse - so the arriving ones take the upper half and the
+//     leaving ones the lower, which is what the old pair of nudged handles did. within a family
+//     the ports follow the lane each edge is heading for, outermost lane first among the leavers
+//     and last among the arrivers, so that a stub never has to cross the run of its neighbour to
+//     reach its own lane
+function assignPorts(
+  all: Edge[],
+  routeOf: Map<string, EdgeRoute>,
+  laneOf: Map<string, number>,
+  slotOf: Map<string, number>,
+  depthOf: Map<string, number>,
+): Ports {
+  interface Attachment {
+    edgeId: string
+    end: 'source' | 'target'
+    key: [number, number]
+  }
+
+  const buckets = new Map<string, Attachment[]>()
+  const add = (node: string, border: Border, attachment: Attachment): void => {
+    const key = `${node}|${border}`
+    const bucket = buckets.get(key)
+    if (bucket === undefined) {
+      buckets.set(key, [attachment])
+    } else {
+      bucket.push(attachment)
+    }
+  }
+
+  for (const edge of all) {
+    const route = routeOf.get(edge.id) ?? 'chain'
+    const lane = laneOf.get(edge.id) ?? 0
+    if (route === 'chain') {
+      add(edge.source, 'bottom', {
+        edgeId: edge.id,
+        end: 'source',
+        key: [slotOf.get(edge.target) ?? 0, depthOf.get(edge.target) ?? 0],
+      })
+      add(edge.target, 'top', {
+        edgeId: edge.id,
+        end: 'target',
+        key: [slotOf.get(edge.source) ?? 0, depthOf.get(edge.source) ?? 0],
+      })
+      continue
+    }
+    // a hop leaves low on a right border and arrives high on one; a loop does the opposite on the
+    // left. so on either side the arrivals of one family and the departures of the other share a
+    // border, and the two never interleave
+    const border = borderOf(route, 'source')
+    const leaverFirst = route === 'loop'
+    add(edge.source, border, {
+      edgeId: edge.id,
+      end: 'source',
+      key: [leaverFirst ? 0 : 1, -lane],
+    })
+    add(edge.target, border, {
+      edgeId: edge.id,
+      end: 'target',
+      key: [leaverFirst ? 1 : 0, lane],
+    })
+  }
+
+  const of = new Map<string, { source: number; target: number }>()
+  const counts = new Map<string, { top: number; right: number; bottom: number; left: number }>()
+  for (const [key, bucket] of buckets) {
+    const [node, border] = key.split('|') as [string, Border]
+    bucket.sort(
+      (a, b) => a.key[0] - b.key[0] || a.key[1] - b.key[1] || compare(a.edgeId, b.edgeId),
+    )
+    bucket.forEach((attachment, index) => {
+      // centred on the border, so a node with one edge on a side keeps it in the middle and the
+      // common case looks exactly as it did
+      const port = index - (bucket.length - 1) / 2
+      const existing = of.get(attachment.edgeId) ?? { source: 0, target: 0 }
+      of.set(attachment.edgeId, { ...existing, [attachment.end]: port })
+    })
+
+    const count = counts.get(node) ?? { top: 0, right: 0, bottom: 0, left: 0 }
+    count[border] = bucket.length
+    counts.set(node, count)
+  }
+
+  const spans = new Map<string, { across: number; down: number }>()
+  for (const [node, count] of counts) {
+    spans.set(node, {
+      across: Math.max(count.top, count.bottom),
+      down: Math.max(count.left, count.right),
+    })
+  }
+  return { of, spans }
 }
 
 // a stage the enum no longer lists sorts to the end rather than to the front, which is where
