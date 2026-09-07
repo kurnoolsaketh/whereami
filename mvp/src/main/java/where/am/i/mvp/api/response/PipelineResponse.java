@@ -7,8 +7,8 @@ import java.util.List;
 
 // the position, not the stage name, is what identifies where someone is: a pipeline may repeat
 // a round, and the name alone cannot tell the first technical round from the second
-public record PipelineResponse(List<Pipeline.Stage> stages, int currentStagePosition, Level level) {
+public record PipelineResponse(String jobId, List<Pipeline.Stage> stages, int currentStagePosition, Level level, Pipeline.Status status) {
     public static PipelineResponse from(Pipeline pipeline) {
-        return new PipelineResponse(pipeline.getStages(), pipeline.getCurrentStagePosition(), pipeline.getLevel());
+        return new PipelineResponse(pipeline.getJobId(), pipeline.getStages(), pipeline.getCurrentStagePosition(), pipeline.getLevel(), pipeline.getStatus());
     }
 }

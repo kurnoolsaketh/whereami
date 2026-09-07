@@ -23,7 +23,24 @@ public class ApplicantService {
         if (jobToPipeline.containsKey(job)) {
             throw new IOException("User [%s] already applied to job [%s]".formatted(user.userId(), job));
         }
-        jobToPipeline.put(job, new Pipeline(level));
+        jobToPipeline.put(job, new Pipeline(level, job.getId()));
+    }
+
+    public void updateStatus(User user, Job job, Pipeline.Status newStatus) throws IOException {
+        // without this an empty body, or {"newStatus": null}, silently sets status to null,
+        // which then serializes as null and makes every screen think the application is neither
+        // active nor ended. every other mutator here validates; this one used to be the gap
+        if (newStatus == null) {
+            throw new IOException("newStatus is required");
+        }
+        var jobToPipeline = applicantToPipelines.get(user);
+        if (jobToPipeline == null) {
+            throw new IOException("User [%s] has not applied to any jobs".formatted(user.userId()));
+        }
+        if (!jobToPipeline.containsKey(job)) {
+            throw new IOException("User [%s] has not applied to job [%s]".formatted(user.userId(), job));
+        }
+        jobToPipeline.get(job).updateStatus(newStatus);
     }
 
     public void removeApplicant(User user, Job job) {

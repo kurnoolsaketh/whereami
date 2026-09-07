@@ -55,8 +55,8 @@ public class RolesController {
     }
 
     // TODO: separate endpoint for level?
-    @GetMapping("/{role}/{company}/applicants")
-    public List<ApplicantResponse> listApplicantsForRoleAndCompany(@PathVariable String role, @PathVariable String company) throws IOException {
+    @GetMapping("/{company}/{role}/applicants")
+    public List<ApplicantResponse> listApplicantsForCompanyAndRole(@PathVariable String role, @PathVariable String company) throws IOException {
         List<ApplicantResponse> applicants = new ArrayList<>();
         for (User user : applicantService.listUsers()) {
             Set<Job> jobs = applicantService.listAppliedJobs(user);

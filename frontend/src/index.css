@@ -7,6 +7,10 @@
   --accent: #2f5bd7;
   --error-bg: #fdeceb;
   --error-text: #a3231a;
+  /* graph edges: light enough that a 6px line does not shout over the nodes it joins, dark
+     enough that a 1px one is still there. the arrowheads are filled with this too, from JS,
+     because an SVG marker takes its colour by attribute rather than by inheriting a stroke */
+  --edge: #97a1b0;
 
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   color: var(--text);
@@ -352,4 +356,363 @@ button:disabled {
   background-color: var(--error-bg);
   color: var(--error-text);
   font-size: 0.9rem;
+}
+
+/* the outcome on an application that has ended, beside the round it ended at */
+.tag {
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+  vertical-align: middle;
+}
+
+/* browse: companies expand to the roles recorded at them. there is no endpoint listing every
+   job any more, so this two-level list is the whole of browse */
+.companies {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.companies > li {
+  border-bottom: 1px solid var(--border);
+}
+
+.companies .toggle {
+  width: 100%;
+  align-self: auto;
+  padding: 0.75rem 0.25rem;
+  background-color: transparent;
+  border-color: transparent;
+  color: var(--text);
+  font-size: 1rem;
+  text-align: left;
+}
+
+.companies .toggle:hover {
+  color: var(--accent);
+}
+
+.roles {
+  padding: 0 0 0.75rem 1.5rem;
+}
+
+.roles ul {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+/* the add-job form picks a role and a level, so selects need the same treatment as inputs
+   outside the stage editor too */
+select {
+  font: inherit;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background-color: var(--surface);
+  color: var(--text);
+}
+
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* an ended pipeline lists its rounds as text rather than as jump buttons */
+.pipeline li > span:first-child {
+  padding: 0.35rem 0;
+}
+
+.pipeline .current > span:first-child {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* the postings recorded for a role, each with its own apply control */
+.postings {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+}
+
+.postings > li {
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.posting {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.posting-title {
+  font-weight: 600;
+}
+
+/* the level select sits inline beside its Save, so its label must not stack the row */
+.postings .actions label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* the role view needs more room than the 44rem every other screen is built for. scoped with
+   :has rather than by changing the global rule, which the rest of the app depends on */
+main:has(.role-view) {
+  max-width: 72rem;
+}
+
+.graph {
+  position: relative;
+  /* the component sets --graph-height from how deep the graph is, so a long pipeline gets room
+     rather than being scaled down into a fixed box. the fallback is the height it always had */
+  height: var(--graph-height, 26rem);
+  margin-top: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--bg);
+  overflow: hidden;
+}
+
+/* the pannable surface. it fills the panel and the svg fills it, so the transform on the <g>
+   inside is the only thing that moves */
+.graph-canvas {
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+
+.graph-canvas.dragging {
+  cursor: grabbing;
+}
+
+.graph-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* every line is drawn twice: an invisible fat one that catches the pointer, and the visible one.
+   a 1px stroke is impossible to hit otherwise, and clicking a line filters the roster the way
+   clicking a node does, so it has to be reachable */
+.graph-edge {
+  cursor: pointer;
+}
+
+.graph-edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 16;
+  pointer-events: stroke;
+}
+
+.graph-edge-line {
+  fill: none;
+  stroke: var(--edge);
+  stroke-linecap: butt;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.graph-edge-head {
+  fill: var(--edge);
+  pointer-events: none;
+}
+
+/* a lit line takes the app's "this one" colour, which already rings a selected node, rather than
+   a colour of its own. red was considered and rejected: it means error everywhere else in the
+   app, and a cycle in this graph is a shape a role really has, not a mistake anyone made */
+.graph-edge.lit .graph-edge-line,
+.graph-edge.lit .graph-edge-head {
+  stroke: var(--accent);
+  fill: var(--accent);
+}
+
+.graph-edge.lit .graph-edge-line {
+  fill: none;
+}
+
+/* a count, sitting on the line it belongs to with the line masked behind it. that is what makes
+   it unmistakable where several lines cross: the number is literally on its own */
+.graph-chip {
+  pointer-events: none;
+}
+
+.graph-chip rect {
+  fill: var(--surface);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.graph-chip text {
+  fill: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+.graph-chip.lit rect {
+  stroke: var(--accent);
+}
+
+.graph-chip.lit text {
+  fill: var(--accent);
+}
+
+/* the nodes are svg rather than html, so these are the same tokens the boxes always took with
+   the property names svg uses: fill for a background, stroke for a border, rx for a radius */
+.graph-node {
+  cursor: pointer;
+}
+
+.graph-node-box {
+  fill: var(--surface);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+/* an outcome is a result, not a round to walk through, so the last row reads as an ending at a
+   glance rather than as more of the same */
+.graph-outcome .graph-node-box {
+  fill: var(--bg);
+  stroke-dasharray: 5 4;
+}
+
+.graph-node.picked .graph-node-box {
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+
+.graph-node.dimmed {
+  opacity: 0.45;
+}
+
+.graph-label {
+  fill: var(--text);
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+.graph-outcome .graph-label {
+  fill: var(--muted);
+  font-weight: 500;
+}
+
+.graph-count-pill {
+  fill: var(--accent);
+}
+
+.graph-count {
+  fill: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+/* the graph can be taller than the panel on a role with a long pipeline, so it pans and zooms.
+   top-right because the bottom corners are where the outcomes land */
+.graph-controls {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.graph-controls button {
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background-color: var(--surface);
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.graph-controls button:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+/* the legend explains a line by showing one. it takes the same tokens as the real edges, so the
+   sample and the thing it describes cannot drift apart. it overlays rather than being fitted
+   around: it appears only on a click, so reserving the corner would waste it on every role, and
+   re-fitting when it appears would move the very line that was just clicked */
+.graph-legend {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  max-width: 14rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  /* the canvas colour, not the card's: the sample chip is --surface like the real ones, so it
+     only reads as a chip against the background the real ones sit on */
+  background-color: var(--bg);
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+.graph-legend p {
+  margin: 0.25rem 0 0;
+}
+
+.graph-legend strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.graph-legend line,
+.graph-legend polygon {
+  stroke: var(--edge);
+  fill: var(--edge);
+}
+
+.graph-legend rect {
+  fill: var(--surface);
+}
+
+.graph-legend text {
+  fill: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+
+/* the fixture page: every role shape the layout has to survive, one under the next, with no
+   backend behind any of them. it is how the drawing is checked by eye */
+.graph-shapes article {
+  margin-bottom: 1.5rem;
+}
+
+.graph-shapes h3 {
+  margin: 0;
+}
+
+.graph-shapes p {
+  margin: 0.15rem 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
 }

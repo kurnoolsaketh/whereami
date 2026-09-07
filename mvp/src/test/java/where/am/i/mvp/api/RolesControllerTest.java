@@ -129,13 +129,13 @@ public class RolesControllerTest {
                 .andExpect(jsonPath("$.message").value("role [Chief Vibes Officer] not found"));
     }
 
-    // GET /api/roles/{role}/{company}/applicants
+    // GET /api/roles/{company}/{role}/applicants
 
     @Test
     public void testApplicantsIsEmptyBeforeAnyoneApplies() throws Exception {
         createJob("swe", "bumco", SWE);
 
-        mockMvc.perform(get("/api/roles/{role}/{company}/applicants", SWE, "bumco"))
+        mockMvc.perform(get("/api/roles/{company}/{role}/applicants", "bumco", SWE))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isEmpty());
     }
@@ -151,7 +151,7 @@ public class RolesControllerTest {
         apply("alpha", swe, "Junior");
         apply("mallory", pm, "Staff");     // other role at the same company, excluded
 
-        mockMvc.perform(get("/api/roles/{role}/{company}/applicants", SWE, "bumco"))
+        mockMvc.perform(get("/api/roles/{company}/{role}/applicants", "bumco", SWE))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(2))
                 .andExpect(jsonPath("$[0].user.userId").value("alpha"))
@@ -173,7 +173,7 @@ public class RolesControllerTest {
         apply("alpha", here, "Mid");
         apply("zeta", elsewhere, "Mid");
 
-        mockMvc.perform(get("/api/roles/{role}/{company}/applicants", SWE, "bumco"))
+        mockMvc.perform(get("/api/roles/{company}/{role}/applicants", "bumco", SWE))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].user.userId").value("alpha"));
@@ -188,11 +188,11 @@ public class RolesControllerTest {
         mockMvc.perform(put("/api/users/zeta/applied/%s/updateStages".formatted(swe))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"stages": ["APPLIED", "TECHNICAL_ROUND", "TECHNICAL_ROUND", "OFFER"],
+                                {"stages": ["APPLIED", "TECHNICAL_ROUND", "TECHNICAL_ROUND", "ONSITE"],
                                  "currentStagePosition": 2}"""))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(get("/api/roles/{role}/{company}/applicants", SWE, "bumco"))
+        mockMvc.perform(get("/api/roles/{company}/{role}/applicants", "bumco", SWE))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].pipeline.stages.length()").value(4))
@@ -206,7 +206,7 @@ public class RolesControllerTest {
         createUser("alpha");
         apply("alpha", swe, "None");
 
-        mockMvc.perform(get("/api/roles/{role}/{company}/applicants", SWE, "ghost"))
+        mockMvc.perform(get("/api/roles/{company}/{role}/applicants", "ghost", SWE))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Company [ghost] is not registered"));
     }
@@ -216,7 +216,7 @@ public class RolesControllerTest {
     // empty rather than rejected
     @Test
     public void testApplicantsForUnknownCompanyIsEmptyWhenNobodyHasApplied() throws Exception {
-        mockMvc.perform(get("/api/roles/{role}/{company}/applicants", SWE, "ghost"))
+        mockMvc.perform(get("/api/roles/{company}/{role}/applicants", "ghost", SWE))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isEmpty());
     }

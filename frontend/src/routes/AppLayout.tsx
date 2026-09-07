@@ -14,8 +14,8 @@ export function AppLayout() {
           <NavLink to="/" end>
             My applications
           </NavLink>
-          <NavLink to="/jobs" end>
-            Browse jobs
+          <NavLink to="/browse" end>
+            Browse roles
           </NavLink>
         </nav>
         <div className="who">
