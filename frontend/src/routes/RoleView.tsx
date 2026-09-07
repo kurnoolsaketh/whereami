@@ -148,13 +148,7 @@ export function RoleView() {
           {graph !== null && graph.nodes.length > 0 && (
             <div className="card">
               <h3>The pipeline for this role</h3>
-              <PipelineGraph
-                nodes={graph.nodes}
-                edges={graph.edges}
-                depths={graph.depths}
-                selected={selected}
-                onSelect={setSelected}
-              />
+              <PipelineGraph graph={graph} selected={selected} onSelect={setSelected} />
             </div>
           )}
 

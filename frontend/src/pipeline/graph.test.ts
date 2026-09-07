@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest'
 import type { Pipeline, Stage, Status } from '../api/types'
-import { buildGraph, edgeHolds, edgeLabel, nodeHolds } from './graph'
-import { bandSlot } from './edgePath'
+import { buildGraph, edgeHolds, edgeLabel, nodeHolds, sharePercent } from './graph'
+import { layoutGraph } from './layout'
 import { labelStages, nodeKey } from './stages'
 
 const STAGES: Stage[] = [
@@ -33,6 +33,40 @@ function nodeAt(g: ReturnType<typeof graph>, id: string) {
   const found = g.nodes.find((node) => node.id === id)
   expect(found, `no node ${id}`).toBeDefined()
   return found!
+}
+
+// the placement of a graph, which lives in layout.ts. the two are asserted together here because
+// a depth is only meaningful against the edges that produced it
+function laid(pipelines: Pipeline[]) {
+  return layoutGraph(graph(pipelines))
+}
+
+function placedAt(l: ReturnType<typeof laid>, id: string) {
+  const found = l.nodes.find((node) => node.id === id)
+  expect(found, `no node ${id}`).toBeDefined()
+  return found!
+}
+
+function rowOf(l: ReturnType<typeof laid>, id: string): number {
+  return placedAt(l, id).depth
+}
+
+function slotOf(l: ReturnType<typeof laid>, id: string): number {
+  return placedAt(l, id).slot
+}
+
+// everything about a role that a redraw must reproduce exactly: the nodes, the edges, and every
+// decision the layout made about them - which row, which slot, which gutter, which track. sorted
+// by id, so the comparison is about the picture and not about the order the arrays came in
+function shapeOf(pipelines: Pipeline[]) {
+  const l = layoutGraph(graph(pipelines))
+  const by = (a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : 1)
+  return {
+    rows: l.rows,
+    box: l.box,
+    nodes: [...l.nodes].sort(by),
+    edges: [...l.edges].sort(by),
+  }
 }
 
 function edgeBetween(g: ReturnType<typeof graph>, source: string, target: string) {
@@ -77,27 +111,39 @@ it('numbers a stage across the whole role, not within one pipeline', () => {
 })
 
 it('depths are the longest path from Applied', () => {
-  const g = graph(WORKED_EXAMPLE)
+  const l = laid(WORKED_EXAMPLE)
 
-  expect(nodeAt(g, 'APPLIED#1').depth).toBe(0)
-  expect(nodeAt(g, 'TECHNICAL_ROUND#1').depth).toBe(1)
-  expect(nodeAt(g, 'TECHNICAL_ROUND#2').depth).toBe(2)
-  expect(nodeAt(g, 'TECHNICAL_ROUND#3').depth).toBe(3)
+  expect(rowOf(l, 'APPLIED#1')).toBe(0)
+  expect(rowOf(l, 'TECHNICAL_ROUND#1')).toBe(1)
+  expect(rowOf(l, 'TECHNICAL_ROUND#2')).toBe(2)
+  expect(rowOf(l, 'TECHNICAL_ROUND#3')).toBe(3)
   // Bob reaches Onsite from Technical Round 1, but the longest path wins, so Onsite sits below
   // every round anyone recorded rather than beside Bob's second
-  expect(nodeAt(g, 'ONSITE#1').depth).toBe(4)
-  expect(g.depths).toBe(5)
+  expect(rowOf(l, 'ONSITE#1')).toBe(4)
+  expect(l.rows).toBe(5)
 })
 
 it('alternatives share a depth, so a fork reads as a fork', () => {
-  const g = graph([pipeline([A, R, O], 1), pipeline([A, T, O], 1)])
+  const l = laid([pipeline([A, R, O], 1), pipeline([A, T, O], 1)])
 
-  expect(nodeAt(g, 'RECRUITER_SCREEN#1').depth).toBe(1)
-  expect(nodeAt(g, 'TECHNICAL_ROUND#1').depth).toBe(1)
+  expect(rowOf(l, 'RECRUITER_SCREEN#1')).toBe(1)
+  expect(rowOf(l, 'TECHNICAL_ROUND#1')).toBe(1)
   // sharing a depth means they need different slots
-  expect(nodeAt(g, 'RECRUITER_SCREEN#1').slot).not.toBe(nodeAt(g, 'TECHNICAL_ROUND#1').slot)
+  expect(slotOf(l, 'RECRUITER_SCREEN#1')).not.toBe(slotOf(l, 'TECHNICAL_ROUND#1'))
   // neither is anyone's parent but Applied, so the canonical stage order decides which is left
-  expect(nodeAt(g, 'RECRUITER_SCREEN#1').slot).toBeLessThan(nodeAt(g, 'TECHNICAL_ROUND#1').slot)
+  expect(slotOf(l, 'RECRUITER_SCREEN#1')).toBeLessThan(slotOf(l, 'TECHNICAL_ROUND#1'))
+})
+
+it('a row of one node is centred, and a row of two straddles the centre', () => {
+  // the drawing is a band of boxes with a clear gutter down each side, which is what gives an
+  // arc somewhere to run that is not through a box. a row hugging the left edge would leave the
+  // whole of that room on one side
+  const l = laid([pipeline([A, R, O], 1), pipeline([A, T, O], 1)])
+
+  expect(placedAt(l, 'APPLIED#1').x).toBe(0)
+  const fork = [placedAt(l, 'RECRUITER_SCREEN#1').x, placedAt(l, 'TECHNICAL_ROUND#1').x]
+  expect(fork[0]).toBeLessThan(0)
+  expect(fork[0] + fork[1]).toBeCloseTo(0)
 })
 
 it('a node sits under its parent, not where the stages endpoint would put it', () => {
@@ -105,19 +151,19 @@ it('a node sits under its parent, not where the stages endpoint would put it', (
   // and Technical to Behavioral, but the endpoint ranks Behavioral before Onsite - so ordering
   // the row by it would put Behavioral on the left, under the branch it does not belong to, and
   // the two branches would swap over each other on the way down
-  const g = graph([pipeline([A, R, O], 2), pipeline([A, T, B], 2)])
+  const l = laid([pipeline([A, R, O], 2), pipeline([A, T, B], 2)])
 
-  expect(nodeAt(g, 'RECRUITER_SCREEN#1').slot).toBe(0)
-  expect(nodeAt(g, 'TECHNICAL_ROUND#1').slot).toBe(1)
-  expect(nodeAt(g, 'ONSITE#1').slot).toBe(0)
-  expect(nodeAt(g, 'BEHAVIORAL_ROUND#1').slot).toBe(1)
+  expect(slotOf(l, 'RECRUITER_SCREEN#1')).toBe(0)
+  expect(slotOf(l, 'TECHNICAL_ROUND#1')).toBe(1)
+  expect(slotOf(l, 'ONSITE#1')).toBe(0)
+  expect(slotOf(l, 'BEHAVIORAL_ROUND#1')).toBe(1)
 })
 
 it('a node with two parents sits under the heavier one', () => {
   // three applicants reach Behavioral from Technical and one from Recruiter, so Behavioral
   // belongs to the Technical branch. under its lighter parent it would share Onsite's key and
   // the endpoint would break the tie the other way round, putting it at slot 0
-  const g = graph([
+  const l = laid([
     pipeline([A, T, B], 2),
     pipeline([A, T, B], 2),
     pipeline([A, T, B], 2),
@@ -125,11 +171,12 @@ it('a node with two parents sits under the heavier one', () => {
     pipeline([A, R, O], 2),
   ])
 
-  expect(nodeAt(g, 'RECRUITER_SCREEN#1').slot).toBe(0)
-  expect(nodeAt(g, 'TECHNICAL_ROUND#1').slot).toBe(1)
-  expect(nodeAt(g, 'ONSITE#1').slot).toBe(0)
-  expect(nodeAt(g, 'BEHAVIORAL_ROUND#1').slot).toBe(1)
+  expect(slotOf(l, 'RECRUITER_SCREEN#1')).toBe(0)
+  expect(slotOf(l, 'TECHNICAL_ROUND#1')).toBe(1)
+  expect(slotOf(l, 'ONSITE#1')).toBe(0)
+  expect(slotOf(l, 'BEHAVIORAL_ROUND#1')).toBe(1)
 })
+
 
 it('edge weights count the applicants who made each move', () => {
   const g = graph(WORKED_EXAMPLE)
@@ -146,7 +193,7 @@ it('a step nobody has taken yet is not an edge, though its rounds are still node
   // has anyone else, so nothing is drawn into Onsite
   expect(g.edges.some((edge) => edge.target === 'ONSITE#1')).toBe(false)
   // the round itself is still part of the role's shape, and still laid out to the right
-  expect(nodeAt(g, 'ONSITE#1').depth).toBe(4)
+  expect(rowOf(layoutGraph(g), 'ONSITE#1')).toBe(4)
 })
 
 it('counts land on the node each pipeline stands at, and an empty stage node survives', () => {
@@ -183,19 +230,12 @@ it('breaks the low-weight edge of a cycle, not whichever came first', () => {
   // graph out, and the consensus wins it
   expect(broken[0].source).toBe('ONSITE#1')
   expect(broken[0].target).toBe('TECHNICAL_ROUND#1')
-  expect(nodeAt(g, 'TECHNICAL_ROUND#1').depth).toBeLessThan(nodeAt(g, 'ONSITE#1').depth)
+  const l = layoutGraph(g)
+  expect(rowOf(l, 'TECHNICAL_ROUND#1')).toBeLessThan(rowOf(l, 'ONSITE#1'))
 })
 
 it('is identical however the applicants are ordered', () => {
-  const forwards = graph(WORKED_EXAMPLE)
-  const backwards = graph([...WORKED_EXAMPLE].reverse())
-
-  const shape = (g: ReturnType<typeof graph>) => ({
-    nodes: [...g.nodes].sort((a, b) => (a.id < b.id ? -1 : 1)),
-    edges: [...g.edges].sort((a, b) => (a.id < b.id ? -1 : 1)),
-    depths: g.depths,
-  })
-  expect(shape(backwards)).toEqual(shape(forwards))
+  expect(shapeOf([...WORKED_EXAMPLE].reverse())).toEqual(shapeOf(WORKED_EXAMPLE))
 })
 
 it('the cycle tie-break survives a reversed input too', () => {
@@ -222,6 +262,7 @@ const CYCLIC_EXAMPLE = [pipeline([A, B, T, O], 2), pipeline([A, H, T, T, B, O], 
 
 it('a cycle terminates, breaks one edge, and lays out top to bottom around it', () => {
   const g = graph(CYCLIC_EXAMPLE)
+  const l = laid(CYCLIC_EXAMPLE)
 
   const broken = g.edges.filter((edge) => edge.backEdge)
   expect(broken).toHaveLength(1)
@@ -229,28 +270,20 @@ it('a cycle terminates, breaks one edge, and lays out top to bottom around it', 
   expect(broken[0].target).toBe('TECHNICAL_ROUND#1')
 
   // Behavioral is pinned below Technical 2 by user2, so user1's Applied -> Behavioral spans
-  // six depths. that hop is forced by the data, not by which edge ranking happened to break
-  expect(nodeAt(g, 'APPLIED#1').depth).toBe(0)
-  expect(nodeAt(g, 'HIRING_MANAGER_SCREEN#1').depth).toBe(1)
-  expect(nodeAt(g, 'TECHNICAL_ROUND#1').depth).toBe(2)
-  expect(nodeAt(g, 'TECHNICAL_ROUND#2').depth).toBe(3)
-  expect(nodeAt(g, 'BEHAVIORAL_ROUND#1').depth).toBe(4)
-  expect(nodeAt(g, 'ONSITE#1').depth).toBe(5)
-  expect(g.depths).toBe(6)
+  // four rows. that reach is forced by the data, not by which edge ranking happened to break
+  expect(rowOf(l, 'APPLIED#1')).toBe(0)
+  expect(rowOf(l, 'HIRING_MANAGER_SCREEN#1')).toBe(1)
+  expect(rowOf(l, 'TECHNICAL_ROUND#1')).toBe(2)
+  expect(rowOf(l, 'TECHNICAL_ROUND#2')).toBe(3)
+  expect(rowOf(l, 'BEHAVIORAL_ROUND#1')).toBe(4)
+  expect(rowOf(l, 'ONSITE#1')).toBe(5)
+  expect(l.rows).toBe(6)
 })
 
 it('the cyclic example is identical however the applicants are ordered', () => {
-  const shape = (pipelines: Pipeline[]) => {
-    const g = graph(pipelines)
-    return {
-      nodes: [...g.nodes].sort((a, b) => (a.id < b.id ? -1 : 1)),
-      edges: [...g.edges].sort((a, b) => (a.id < b.id ? -1 : 1)),
-      depths: g.depths,
-    }
-  }
-
-  expect(shape([...CYCLIC_EXAMPLE].reverse())).toEqual(shape(CYCLIC_EXAMPLE))
+  expect(shapeOf([...CYCLIC_EXAMPLE].reverse())).toEqual(shapeOf(CYCLIC_EXAMPLE))
 })
+
 
 it('a status nobody holds produces no node, and recording it adds exactly one', () => {
   const active = graph([pipeline([A, T, O], 1)])
@@ -269,22 +302,23 @@ it('pins an outcome to the last row even when its only edge comes from an early 
   const early = Array.from({ length: 10 }, () => pipeline([A, R, T, O], 1, 'REJECTED'))
   const late = pipeline([A, R, T, O], 3, 'REJECTED')
   const g = graph([...early, late])
+  const l = layoutGraph(g)
 
-  expect(nodeAt(g, 'ONSITE#1').depth).toBe(3)
-  expect(nodeAt(g, 'REJECTED').depth).toBe(4)
+  expect(rowOf(l, 'ONSITE#1')).toBe(3)
+  expect(rowOf(l, 'REJECTED')).toBe(4)
   expect(edgeBetween(g, 'RECRUITER_SCREEN#1', 'REJECTED').weight).toBe(10)
   expect(edgeBetween(g, 'ONSITE#1', 'REJECTED').weight).toBe(1)
 })
 
 it('outcome nodes share the last row and are ordered by the statuses endpoint', () => {
-  const g = graph([
+  const l = laid([
     pipeline([A, T, O], 1, 'REJECTED'),
     pipeline([A, T, O], 1, 'OFFER'),
     pipeline([A, T, O], 1, 'USER_WITHDREW'),
   ])
 
-  const outcomes = g.nodes.filter((node) => node.kind === 'outcome')
-  expect(outcomes.every((node) => node.depth === g.depths - 1)).toBe(true)
+  const outcomes = l.nodes.filter((node) => node.kind === 'outcome')
+  expect(outcomes.every((node) => node.depth === l.rows - 1)).toBe(true)
   // USER_WITHDREW, OFFER, REJECTED is the order GET /api/statuses returns them in
   expect([...outcomes].sort((a, b) => a.slot - b.slot).map((node) => node.id)).toEqual([
     'USER_WITHDREW',
@@ -292,6 +326,7 @@ it('outcome nodes share the last row and are ordered by the statuses endpoint', 
     'REJECTED',
   ])
 })
+
 
 // the strongest assertion in the file: it catches double-counting and dropped pipelines at once
 it('the badges sum to the number of pipelines, counting each exactly once', () => {
@@ -332,7 +367,7 @@ it('handles no pipelines at all', () => {
 
   expect(g.nodes).toEqual([])
   expect(g.edges).toEqual([])
-  expect(g.depths).toBe(0)
+  expect(layoutGraph(g).rows).toBe(0)
 })
 
 // how many applicants ever stood on a node - the denominator every edge leaving it is measured
@@ -407,15 +442,14 @@ it('outgoing weights plus the badge account for everyone who reached a node', ()
   }
 })
 
-it('an edge label carries both the count and the share', () => {
+it('an edge label carries the count and nothing else', () => {
   const g = graph(WORKED_EXAMPLE)
 
-  // all three reached Applied and all three moved on to a technical round
-  expect(edgeLabel(edgeBetween(g, 'APPLIED#1', 'TECHNICAL_ROUND#1'))).toBe('3 \u00b7 100%')
-  // three reached the first technical round and two of them went on to a second
-  expect(edgeLabel(edgeBetween(g, 'TECHNICAL_ROUND#1', 'TECHNICAL_ROUND#2'))).toBe('2 \u00b7 67%')
-  // two reached the second and one of them went on to a third
-  expect(edgeLabel(edgeBetween(g, 'TECHNICAL_ROUND#2', 'TECHNICAL_ROUND#3'))).toBe('1 \u00b7 50%')
+  // the chip is a count, not a sentence: the share is what sets the line's thickness, and the
+  // legend spells it out in words when the line is clicked
+  expect(edgeLabel(edgeBetween(g, 'APPLIED#1', 'TECHNICAL_ROUND#1'))).toBe('3')
+  expect(edgeLabel(edgeBetween(g, 'TECHNICAL_ROUND#1', 'TECHNICAL_ROUND#2'))).toBe('2')
+  expect(edgeLabel(edgeBetween(g, 'TECHNICAL_ROUND#2', 'TECHNICAL_ROUND#3'))).toBe('1')
 })
 
 it('a drawn edge never rounds down to nobody', () => {
@@ -424,108 +458,9 @@ it('a drawn edge never rounds down to nobody', () => {
   const crowd = Array.from({ length: 300 }, () => pipeline([A, T, O], 1))
   const g = graph([...crowd, pipeline([A, R, O], 1)])
 
-  expect(edgeLabel(edgeBetween(g, 'APPLIED#1', 'RECRUITER_SCREEN#1'))).toBe('1 \u00b7 1%')
-})
-
-// arcs are laid out by interval-graph colouring, and this is the property that has to hold: two
-// arcs in one gutter whose depth spans overlap must never share a lane, or they are drawn one on
-// top of the other. asserted as an invariant rather than on fixed numbers, because the numbers
-// are exactly what a future layout change is allowed to move
-function arcsOverlapInALane(g: ReturnType<typeof graph>): string[] {
-  const depthOf = new Map(g.nodes.map((node) => [node.id, node.depth]))
-  const slotOf = new Map(g.nodes.map((node) => [node.id, node.slot]))
-  const arcs = g.edges
-    .filter((edge) => edge.route !== 'chain')
-    .map((edge) => {
-      const a = depthOf.get(edge.source) ?? 0
-      const b = depthOf.get(edge.target) ?? 0
-      const gutter = bandSlot(edge.route, slotOf.get(edge.source) ?? 0, slotOf.get(edge.target) ?? 0)
-      return { edge, band: `${edge.route}@${gutter}`, left: Math.min(a, b), right: Math.max(a, b) }
-    })
-
-  const clashes: string[] = []
-  for (let i = 0; i < arcs.length; i += 1) {
-    for (let j = i + 1; j < arcs.length; j += 1) {
-      const [a, b] = [arcs[i], arcs[j]]
-      const overlaps = Math.min(a.right, b.right) > Math.max(a.left, b.left)
-      if (a.band === b.band && a.edge.lane === b.edge.lane && overlaps) {
-        clashes.push(`${a.edge.id} and ${b.edge.id} share lane ${a.edge.lane}`)
-      }
-    }
-  }
-  return clashes
-}
-
-it('a chain edge takes no lane, a cycle edge loops, a long reach hops', () => {
-  const g = graph(CYCLIC_EXAMPLE)
-
-  expect(edgeBetween(g, 'APPLIED#1', 'HIRING_MANAGER_SCREEN#1').route).toBe('chain')
-  // Behavioral sits four depths below Applied, so user1's second step has to reach past them
-  expect(edgeBetween(g, 'APPLIED#1', 'BEHAVIORAL_ROUND#1').route).toBe('hop')
-  expect(edgeBetween(g, 'BEHAVIORAL_ROUND#1', 'TECHNICAL_ROUND#1').route).toBe('loop')
-  for (const edge of g.edges.filter((candidate) => candidate.route === 'chain')) {
-    expect(edge.lane, edge.id).toBe(0)
-  }
-})
-
-it('two arcs of the SAME length that overlap get different lanes', () => {
-  // the case a length-keyed lane cannot express: Technical 1 -> Onsite and Technical 2 -> Rejected
-  // both reach three depths, so keying on the reach puts them on one line even though they
-  // overlap for most of it. staggered, not nested - which is what consecutive stages produce
-  const g = graph([
-    // walked all the way to the onsite, so Technical 1 -> Onsite is a move somebody made
-    pipeline([A, B, T, O], 3),
-    pipeline([A, H, T, T, B, O], 3),
-    pipeline([A, H, T, T, B, O], 3, 'REJECTED'),
-  ])
-
-  const first = edgeBetween(g, 'TECHNICAL_ROUND#1', 'ONSITE#1')
-  const second = edgeBetween(g, 'TECHNICAL_ROUND#2', 'REJECTED')
-  expect(first.route).toBe('hop')
-  expect(second.route).toBe('hop')
-  expect(first.lane).not.toBe(second.lane)
-  expect(arcsOverlapInALane(g)).toEqual([])
-})
-
-it('no two overlapping arcs ever share a lane, across a spread of roles', () => {
-  const roles = [
-    CYCLIC_EXAMPLE,
-    WORKED_EXAMPLE,
-    // a fan of outcomes leaving different rounds for the same last row
-    [
-      pipeline([A, R, T, O], 1, 'REJECTED'),
-      pipeline([A, R, T, O], 2, 'REJECTED'),
-      pipeline([A, R, T, O], 3, 'OFFER'),
-      pipeline([A, R, T, O], 0, 'USER_WITHDREW'),
-    ],
-    // a staircase of equal-length hops, the shape that defeats a length-keyed lane. everyone is
-    // walked to the end of their own list, so every announced step is also a move made
-    [
-      pipeline([A, R, O], 2),
-      pipeline([A, R, H, T, B, O], 5),
-      pipeline([A, H, O], 2),
-      pipeline([A, R, H, T, O], 4),
-    ],
-  ]
-
-  let hops = 0
-  for (const pipelines of roles) {
-    const g = graph(pipelines)
-    hops += g.edges.filter((edge) => edge.route === 'hop').length
-    expect(arcsOverlapInALane(g), JSON.stringify(pipelines)).toEqual([])
-  }
-
-  // not every role has an arc - a role everyone walked in the same order is all chain - but the
-  // spread has to contain some, or this asserts nothing at all
-  expect(hops).toBeGreaterThan(0)
-})
-
-it('lanes are packed from the inside out, so a lone arc hugs the chain', () => {
-  const g = graph([pipeline([A, R, T, O], 3), pipeline([A, O, R, T], 3)])
-  const hops = g.edges.filter((edge) => edge.route === 'hop')
-
-  expect(hops.length).toBeGreaterThan(0)
-  expect(Math.min(...hops.map((edge) => edge.lane))).toBe(0)
+  // one applicant in three hundred is a real applicant, so the share the legend quotes is
+  // floored at 1% rather than rounded away to nothing
+  expect(sharePercent(edgeBetween(g, 'APPLIED#1', 'RECRUITER_SCREEN#1'))).toBe(1)
 })
 
 // nodeHolds is what the roster filters by, so it has to agree with the badge exactly

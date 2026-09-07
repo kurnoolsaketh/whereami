@@ -34,8 +34,16 @@ npm run dev
 
 Then open http://localhost:5173.
 
-Everything lives in memory in the backend process. There is no sample data — you create
-users, jobs and pipelines through the UI — and restarting the backend clears all of it.
+Everything lives in memory in the backend process, so restarting the backend clears all of it.
+There is no sample data either, but you do not have to click a dozen applicants back in by hand:
+
+```
+node scripts/seed.mjs
+```
+
+posts a set of role shapes through the real API and prints a link to each one. And if you are
+working on the graph rather than on the app, http://localhost:5173/dev/graph draws every one of
+those shapes from hand-written fixtures with **no backend at all**.
 
 ## Using it
 
@@ -68,13 +76,13 @@ numbers in a sample chip.
   of it — which means your own plain "Technical Round" can appear here as "Technical Round 1".
 - A node's **badge** counts the people standing there now. Clicking a node filters the list
   below to exactly those people, and clicking a **line** does the same for the applicants who
-  made that move — the filtered list always has exactly as many rows as the badge or label
+  made that move — the filtered list always has exactly as many rows as the badge or count
   claims. Pointing at a line lifts it above the ones it crosses and colours it, which is how you
   tell which label belongs to which line where several run close together.
 - An edge is a **move somebody made**, not a round they were told about: an applicant sitting at
   Applied with five rounds ahead is on none of the lines yet. Its **label** is how many
-  applicants made that move and what share of everyone who *reached that node* they are, and its
-  **thickness** tracks that share. So the edges leaving a node account for exactly the people who
+  applicants made that move, and its **thickness** is what share of everyone who *reached that
+  node* they are — the share itself is spelled out when you click the line. So the edges leaving a node account for exactly the people who
   got there: each of them either moved on, ended there, or is standing on it and counted in the
   badge.
 - A round sits **under the round that leads to it**, so a branch stays in one block instead of
@@ -84,13 +92,19 @@ numbers in a sample chip.
   round after a technical one is a real shape, not a mistake by whoever recorded it. Ranking the
   rows still needs an acyclic graph, so one edge of each cycle is held out of the
   ranking — chosen by weight, so one outlier cannot reorder the graph — but it is drawn like
-  every other edge, arcing back up the left so it stays visible. Arrowheads carry the direction.
-- An edge that reaches past the next row **arcs down the right** of the nodes in between rather
-  than cutting through them, and arcs are stacked into lanes so that two which overlap are never
-  drawn on top of each other.
-- **No two lines are ever drawn along the same line.** Each one leaves a node at its own point on
-  the border and travels in a lane nothing else is using, so lines cross — which a merged pipeline
-  really does — but never lie on top of each other, where two counts would look like one.
+  every other edge. Arrowheads carry the direction.
+- A line is **straight whenever a straight line fits**: down to the round below, or diagonally
+  across open space to an outcome. It curves only where the straight version would cut through
+  another round's box — and then it leaves the column entirely, sweeps down a gutter beside it,
+  and comes back, rather than threading between the boxes.
+- Where two rounds have traffic **both ways**, neither line is straight: they bend apart to
+  opposite sides and enclose a narrow lens, so the two arrowheads never crowd each other.
+- **Curves nest rather than cross.** The two gutters carry as near to half the curves each as the
+  shape allows, and inside one gutter the longer curve runs outside the shorter, so a pair that
+  nests reads as two arches.
+- **No two lines are ever drawn on top of each other.** Each leaves its node at its own point on
+  the border and travels in a track nothing else is using, so lines cross — which a merged
+  pipeline really does — but never lie along each other, where two counts would look like one.
 - The **last row** holds outcomes rather than rounds. Their placement asserts nothing
   about when people fall out — the edge weights carry that. An outcome nobody holds is not
   drawn at all.
@@ -127,6 +141,11 @@ so a client function can request a path the backend stopped serving and still ty
 cleanly — which is exactly how the frontend once drifted a whole release behind the API.
 `src/api/client.test.ts` pins the path, method and body of every wrapped endpoint, so a
 rename on either side breaks a line there.
+
+The graph's *drawing* is not tested. `graph.test.ts` covers what it means — weights, shares,
+badge counts, filtering, and that the whole layout comes out identical however the applicants
+are ordered — but whether the picture reads well is checked by eye on `/dev/graph`, which is
+why every shape worth looking at is a fixture there.
 
 ## Layout
 

@@ -4,6 +4,7 @@ import { AddJob } from './routes/AddJob'
 import { AppLayout } from './routes/AppLayout'
 import { Applied } from './routes/Applied'
 import { Browse } from './routes/Browse'
+import { GraphShapes } from './routes/GraphShapes'
 import { MyApplications } from './routes/MyApplications'
 import { RoleView } from './routes/RoleView'
 import { SignIn } from './routes/SignIn'
@@ -13,6 +14,10 @@ export default function App() {
   return (
     <Routes>
       <Route path="/sign-in" element={<SignIn />} />
+      {/* the layout fixtures, for working on the graph. not linked from anywhere and outside the
+          session on purpose: it renders every role shape from hand-written pipelines with no
+          backend behind them, so needing to sign in would be needing the very thing it avoids */}
+      <Route path="/dev/graph" element={<GraphShapes />} />
       <Route element={<RequireSession />}>
         <Route element={<AppLayout />}>
           <Route path="/" element={<MyApplications />} />

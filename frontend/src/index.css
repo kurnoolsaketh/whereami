@@ -473,6 +473,7 @@ main:has(.role-view) {
 }
 
 .graph {
+  position: relative;
   /* the component sets --graph-height from how deep the graph is, so a long pipeline gets room
      rather than being scaled down into a fixed box. the fallback is the height it always had */
   height: var(--graph-height, 26rem);
@@ -480,28 +481,186 @@ main:has(.role-view) {
   border: 1px solid var(--border);
   border-radius: 8px;
   background-color: var(--bg);
-
-  /* React Flow reads each of these as var(--xy-*, its own default) and never sets the
-     non-default half itself, so declaring them on the container is the supported way to theme
-     it - no selector has to out-specify the library's stylesheet */
-  --xy-edge-stroke: var(--edge);
-  --xy-edge-stroke-selected: var(--edge);
-  --xy-edge-label-background-color: var(--surface);
-  --xy-edge-label-color: var(--muted);
+  overflow: hidden;
 }
 
-/* an edge label carries two values now - a count and a share - where it used to carry one
-   number, so the library's 10px is not enough to read them at a glance */
-.graph .react-flow__edge-text {
+/* the pannable surface. it fills the panel and the svg fills it, so the transform on the <g>
+   inside is the only thing that moves */
+.graph-canvas {
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+
+.graph-canvas.dragging {
+  cursor: grabbing;
+}
+
+.graph-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* every line is drawn twice: an invisible fat one that catches the pointer, and the visible one.
+   a 1px stroke is impossible to hit otherwise, and clicking a line filters the roster the way
+   clicking a node does, so it has to be reachable */
+.graph-edge {
+  cursor: pointer;
+}
+
+.graph-edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 16;
+  pointer-events: stroke;
+}
+
+.graph-edge-line {
+  fill: none;
+  stroke: var(--edge);
+  stroke-linecap: butt;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.graph-edge-head {
+  fill: var(--edge);
+  pointer-events: none;
+}
+
+/* a lit line takes the app's "this one" colour, which already rings a selected node, rather than
+   a colour of its own. red was considered and rejected: it means error everywhere else in the
+   app, and a cycle in this graph is a shape a role really has, not a mistake anyone made */
+.graph-edge.lit .graph-edge-line,
+.graph-edge.lit .graph-edge-head {
+  stroke: var(--accent);
+  fill: var(--accent);
+}
+
+.graph-edge.lit .graph-edge-line {
+  fill: none;
+}
+
+/* a count, sitting on the line it belongs to with the line masked behind it. that is what makes
+   it unmistakable where several lines cross: the number is literally on its own */
+.graph-chip {
+  pointer-events: none;
+}
+
+.graph-chip rect {
+  fill: var(--surface);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.graph-chip text {
+  fill: var(--muted);
   font-size: 0.7rem;
   font-weight: 600;
+  text-anchor: middle;
+  dominant-baseline: central;
 }
 
-/* the legend explains a line's label by showing one. it takes the same tokens as the real edges -
-   --edge for the line and arrowhead, --surface for the chip - so the sample and the thing it
-   describes cannot drift apart. pointer-events are off so it never swallows a click meant for an
-   edge underneath it */
-.graph-legend.react-flow__panel {
+.graph-chip.lit rect {
+  stroke: var(--accent);
+}
+
+.graph-chip.lit text {
+  fill: var(--accent);
+}
+
+/* the nodes are svg rather than html, so these are the same tokens the boxes always took with
+   the property names svg uses: fill for a background, stroke for a border, rx for a radius */
+.graph-node {
+  cursor: pointer;
+}
+
+.graph-node-box {
+  fill: var(--surface);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+/* an outcome is a result, not a round to walk through, so the last row reads as an ending at a
+   glance rather than as more of the same */
+.graph-outcome .graph-node-box {
+  fill: var(--bg);
+  stroke-dasharray: 5 4;
+}
+
+.graph-node.picked .graph-node-box {
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+
+.graph-node.dimmed {
+  opacity: 0.45;
+}
+
+.graph-label {
+  fill: var(--text);
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+.graph-outcome .graph-label {
+  fill: var(--muted);
+  font-weight: 500;
+}
+
+.graph-count-pill {
+  fill: var(--accent);
+}
+
+.graph-count {
+  fill: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+/* the graph can be taller than the panel on a role with a long pipeline, so it pans and zooms.
+   top-right because the bottom corners are where the outcomes land */
+.graph-controls {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.graph-controls button {
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background-color: var(--surface);
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.graph-controls button:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+/* the legend explains a line by showing one. it takes the same tokens as the real edges, so the
+   sample and the thing it describes cannot drift apart. it overlays rather than being fitted
+   around: it appears only on a click, so reserving the corner would waste it on every role, and
+   re-fitting when it appears would move the very line that was just clicked */
+.graph-legend {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
   max-width: 14rem;
   padding: 0.45rem 0.6rem;
   border: 1px solid var(--border);
@@ -542,68 +701,18 @@ main:has(.role-view) {
   dominant-baseline: middle;
 }
 
-/* clicking a line filters the roster the way clicking a node does, so it has to look clickable.
-   the colour change on hover is driven from JS rather than here, because a hovered line also has
-   to be raised above the ones it crosses and SVG has no z-index */
-.graph .react-flow__edge {
-  cursor: pointer;
+/* the fixture page: every role shape the layout has to survive, one under the next, with no
+   backend behind any of them. it is how the drawing is checked by eye */
+.graph-shapes article {
+  margin-bottom: 1.5rem;
 }
 
-/* React Flow ships its own node chrome; these are our own nodes, so they take the app's
-   surface, border and accent rather than the library's defaults */
-.graph-node {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--border);
-  background-color: var(--surface);
-  font-size: 0.85rem;
-  cursor: pointer;
+.graph-shapes h3 {
+  margin: 0;
 }
 
-.graph-stage {
-  border-radius: 6px;
-}
-
-/* an outcome is a result, not a round to walk through, so the last row reads as an ending
-   at a glance rather than as more of the same */
-.graph-outcome {
-  border-radius: 999px;
-  border-style: dashed;
-  background-color: var(--bg);
+.graph-shapes p {
+  margin: 0.15rem 0 0;
   color: var(--muted);
-}
-
-.graph-node.picked {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent);
-}
-
-.graph-node.dimmed {
-  opacity: 0.45;
-}
-
-.graph-label {
-  font-weight: 600;
-}
-
-.graph-outcome .graph-label {
-  font-weight: 500;
-}
-
-.graph-count {
-  padding: 0.05rem 0.4rem;
-  border-radius: 999px;
-  background-color: var(--accent);
-  color: #ffffff;
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
-/* the hop and loop handles exist to route an edge away from the main chain, not to be
-   interacted with - React Flow's default handle dots would otherwise be six specks per node */
-.graph-node .react-flow__handle {
-  opacity: 0;
-  pointer-events: none;
+  font-size: 0.8rem;
 }
