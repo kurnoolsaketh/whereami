@@ -6,17 +6,22 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
 public record Job(String title, Company company, URL url, Role role, boolean active) {
-    static final MessageDigest hash;
-    static {
+
+    // a MessageDigest carries the bytes fed to it so far, so it cannot be shared: the server
+    // computes ids on tomcat's request threads, and two of them digesting at once interleaved
+    // their update() and digest() calls and handed both callers the hash of the two jobs run
+    // together. one instance per call is the whole fix - it is a cheap object, and an id is a
+    // pure function of the record's fields either way
+    public String getId() {
+        return bytesToHex(digest().digest((title + company + url.toString() + role.toString()).getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private static MessageDigest digest() {
         try {
-            hash = MessageDigest.getInstance("SHA-256");
+            return MessageDigest.getInstance("SHA-256");
         } catch (NoSuchAlgorithmException e) {
             throw new RuntimeException(e);
         }
-    }
-
-    public String getId() {
-        return bytesToHex(hash.digest((title + company + url.toString() + role.toString()).getBytes(StandardCharsets.UTF_8)));
     }
 
     private static String bytesToHex(byte[] hash) {

@@ -30,7 +30,7 @@ MVP can be found under `whereami/mvp`. Its package structure is as follows:
   - `ApiExceptionHandler`: maps `IOException` to HTTP 400 with a JSON message, because `IOException` is what the existing code throws for every validation failure. It also maps `HttpMessageNotReadableException` — a body Spring cannot parse is rejected before any controller runs, so without that handler an unknown enum value reaches the client as Spring's default error body, which has no `message` field for the frontend to read.
   - Every endpoint that returns a list sorts it in the controller. The underlying collections are `HashMap`s and `HashSet`s, so iteration order is not stable across runs.
 
-Backend tests are under `mvp/src/test/java`: a MockMvc test per controller.
+Backend tests are under `mvp/src/test/java`: a MockMvc test per controller, plus `entities/JobTest`, which pins job ids against concurrent calls — they are computed on Tomcat's request threads, and one screen load fires four requests at once.
 
 #### Path-variable order
 
@@ -137,5 +137,4 @@ These predate the HTTP layer and are marked with `//TODO` where they live, rathe
 
 - Validation failures throughout are signalled with `IOException`, which is not an I/O condition. Callers cannot tell a bad argument from a real read/write failure.
 - `JobRegistry.getJob` rejects ids whose length is not 64 with the message "must be 64 bytes" — it is 64 hex characters, which is 32 bytes.
-- `Job.getId()` digests through a single `static MessageDigest`, which is not thread-safe. It is fine while everything is in memory and single-threaded per request, but it will not survive real concurrency.
 - `ApplicantService.addApplied`'s "already applied" message interpolates the whole `Job` record, so its `toString()` reaches the user. The frontend surfaces that message verbatim on the submit-a-job screen.
