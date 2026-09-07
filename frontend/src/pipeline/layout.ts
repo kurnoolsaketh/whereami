@@ -45,10 +45,8 @@ export type EdgeShape = 'straight' | 'curve' | 'bow'
 
 export interface RoutedEdge extends GraphEdge {
   shape: EdgeShape
-  // curve only: -1 for the left gutter, +1 for the right, and which track of it. track 0 is
-  // nearest the band. `trackX` is the x its straight run travels on
-  side: -1 | 0 | 1
-  track: number
+  // curve only: the x its straight run travels on. which gutter it is in and which track of that
+  // gutter are decided in layoutGraph and land here already resolved to that one number
   trackX: number
   // bow only: which way this half of the pair bends
   bowDir: -1 | 0 | 1
@@ -247,8 +245,6 @@ export function layoutGraph(graph: Graph): Layout {
     return {
       ...edge,
       shape,
-      side: place?.side ?? 0,
-      track: place?.track ?? 0,
       trackX: place === undefined ? 0 : trackX(place.side, place.track),
       bowDir: bowOf.get(edge.id) ?? 0,
       from: shot?.from ?? { x: 0, y: 0 },

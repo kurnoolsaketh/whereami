@@ -1,4 +1,4 @@
-import { BOX_HEIGHT, BOW, type Point, type RoutedEdge } from './layout'
+import { BOW, type Point, type RoutedEdge } from './layout'
 
 // where an edge actually runs, in pixels. layout.ts has already decided everything that needs
 // deciding - which shape, which gutter, which track, and the two points on the borders - so this
@@ -120,24 +120,6 @@ export function endOf(segments: Seg[]): Point | undefined {
   return segments[segments.length - 1]?.b
 }
 
-// which way the edge is travelling as it arrives. only a fallback now, for a path so short that
-// the trim consumed all of it and left no chord to take the direction from
-export function approachOf(segments: Seg[]): Point {
-  const last = segments[segments.length - 1]
-  if (last === undefined) {
-    return { x: 0, y: 1 }
-  }
-  const before =
-    last.kind === 'line'
-      ? last.a
-      : apart(last.c2, last.b)
-        ? last.c2
-        : apart(last.c1, last.b)
-          ? last.c1
-          : last.a
-  return unit({ x: last.b.x - before.x, y: last.b.y - before.y })
-}
-
 // the polyline an edge follows, sampled evenly enough that a curve reads as a curve. used for
 // placing labels and for nothing the reader sees, so the sampling only has to be fine enough to
 // measure distances against
@@ -229,11 +211,6 @@ function lengthOf(points: Point[]): number {
     total += distance(points[i - 1], points[i])
   }
   return total
-}
-
-// how tall a graph of this many rows draws, which is what the panel is sized from
-export function heightOf(rows: number, rowPitch: number): number {
-  return rows <= 0 ? 0 : (rows - 1) * rowPitch + BOX_HEIGHT
 }
 
 // ---------------------------------------------------------------------------
@@ -347,15 +324,6 @@ function distance(a: Point, b: Point): number {
 
 function lerp(a: Point, b: Point, t: number): Point {
   return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }
-}
-
-function unit(point: Point): Point {
-  const length = Math.hypot(point.x, point.y)
-  return length === 0 ? { x: 0, y: 1 } : { x: point.x / length, y: point.y / length }
-}
-
-function apart(a: Point, b: Point): boolean {
-  return distance(a, b) > 0.5
 }
 
 function round(value: number): number {

@@ -1,7 +1,6 @@
 import { useMemo, useState, type CSSProperties } from 'react'
 import { edgeLabel, sharePercent, type Graph, type GraphEdge, type Selection } from './graph'
 import {
-  approachOf,
   arrowHalfWidth,
   arrowLength,
   endOf,
@@ -203,14 +202,14 @@ function draw(layout: Layout): Drawn[] {
     // the arrival tangent. on a curve those are not the same place - the tangent leaves the arc
     // immediately - and the head is then adrift from the line by however far the two disagree,
     // which is why some arrows sat clear of their own edge while every straight one was flush.
-    // taking the base from the trimmed path also points the head the way the line really arrives
+    // taking the base from the trimmed path also points the head the way the line really arrives.
+    //
+    // the trim always bites: arrowLength is at least 9px, and the two ends of an edge sit on the
+    // borders of two different boxes a row or a slot apart, so `reach` is never zero
     const drawn = shortenBy(list, arrowLength(stroke))
     const base = endOf(drawn) ?? edge.to
     const reach = Math.hypot(edge.to.x - base.x, edge.to.y - base.y)
-    const heading =
-      reach < 0.01
-        ? approachOf(list)
-        : { x: (edge.to.x - base.x) / reach, y: (edge.to.y - base.y) / reach }
+    const heading = { x: (edge.to.x - base.x) / reach, y: (edge.to.y - base.y) / reach }
 
     return {
       edge,

@@ -1,4 +1,4 @@
-import type { Applicant, Pipeline, Stage, Status } from '../api/types'
+import type { Pipeline, Stage, Status } from '../api/types'
 
 // the role shapes the graph has to survive, written out by hand so the layout can be looked at
 // without a backend. the dev route renders every one of them down a single page, which is what
@@ -139,15 +139,3 @@ export const SHAPES: Shape[] = [
     pipelines: [at([A, R, H, T, O], 1)],
   },
 ]
-
-// the same fixtures dressed as applicants, for the roster beside the graph on the dev page
-export function applicantsOf(shape: Shape): Applicant[] {
-  return shape.pipelines.map((pipeline, index) => ({
-    user: {
-      userId: `fixture-${index + 1}`,
-      firstName: 'Applicant',
-      lastName: `${index + 1}`,
-    },
-    pipeline: { ...pipeline, jobId: `${shape.name}-${index + 1}` },
-  }))
-}
