@@ -4,10 +4,12 @@ import {
   approachOf,
   arrowHalfWidth,
   arrowLength,
+  endOf,
   labelPoints,
   pathOf,
   polylineOf,
   segmentsOf,
+  shortenBy,
   type Seg,
 } from './edgePath'
 import { layoutGraph, type Layout, type PlacedNode, type Point, type RoutedEdge } from './layout'
@@ -57,7 +59,7 @@ interface PipelineGraphProps {
 interface Drawn {
   edge: RoutedEdge
   stroke: number
-  // the visible line, stopped at the arrowhead's base, and the full one underneath it that
+  // the visible line, stopped where the arrowhead begins, and the full one underneath it that
   // catches the pointer. a 1px line is impossible to hit, so every edge has a fat invisible twin
   d: string
   hit: string
@@ -195,16 +197,26 @@ function draw(layout: Layout): Drawn[] {
   return layout.edges.map((edge) => {
     const list = segments.get(edge.id) ?? []
     const stroke = MIN_WIDTH + (MAX_WIDTH - MIN_WIDTH) * edge.share
-    const length = arrowLength(stroke)
     const half = arrowHalfWidth(stroke)
-    const heading = approachOf(list)
-    const base = { x: edge.to.x - heading.x * length, y: edge.to.y - heading.y * length }
+
+    // the head starts exactly where the line stops, rather than at a point measured back along
+    // the arrival tangent. on a curve those are not the same place - the tangent leaves the arc
+    // immediately - and the head is then adrift from the line by however far the two disagree,
+    // which is why some arrows sat clear of their own edge while every straight one was flush.
+    // taking the base from the trimmed path also points the head the way the line really arrives
+    const drawn = shortenBy(list, arrowLength(stroke))
+    const base = endOf(drawn) ?? edge.to
+    const reach = Math.hypot(edge.to.x - base.x, edge.to.y - base.y)
+    const heading =
+      reach < 0.01
+        ? approachOf(list)
+        : { x: (edge.to.x - base.x) / reach, y: (edge.to.y - base.y) / reach }
 
     return {
       edge,
       stroke,
-      d: pathOf(list, length),
-      hit: pathOf(list, 0),
+      d: pathOf(drawn),
+      hit: pathOf(list),
       head: [
         [edge.to.x, edge.to.y],
         [base.x - heading.y * half, base.y + heading.x * half],

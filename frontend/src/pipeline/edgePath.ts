@@ -91,9 +91,9 @@ export function segmentsOf(edge: RoutedEdge): Seg[] {
   ]
 }
 
-// the path as SVG, stopped short by `trim` px so the line ends where the arrowhead's base begins
-export function pathOf(segments: Seg[], trim: number): string {
-  const drawn = trim <= 0 ? segments : shorten(segments, trim)
+// the path as SVG
+export function pathOf(segments: Seg[]): string {
+  const drawn = segments
   if (drawn.length === 0) {
     return ''
   }
@@ -107,7 +107,21 @@ export function pathOf(segments: Seg[], trim: number): string {
   return d
 }
 
-// which way the edge is travelling as it arrives, for the arrowhead to point along
+// the same path with its last `by` px cut off, which is where the arrowhead takes over. the
+// caller draws the head from the point this ends at rather than from a point of its own: walking
+// back along the arrival tangent instead lands somewhere else entirely on a bend, and the two
+// disagreeing is what leaves a line short of its own arrowhead
+export function shortenBy(segments: Seg[], by: number): Seg[] {
+  return by <= 0 ? segments : shorten(segments, by)
+}
+
+// where a path stops, which is where its arrowhead begins
+export function endOf(segments: Seg[]): Point | undefined {
+  return segments[segments.length - 1]?.b
+}
+
+// which way the edge is travelling as it arrives. only a fallback now, for a path so short that
+// the trim consumed all of it and left no chord to take the direction from
 export function approachOf(segments: Seg[]): Point {
   const last = segments[segments.length - 1]
   if (last === undefined) {
@@ -240,19 +254,32 @@ function shorten(segments: Seg[], by: number): Seg[] {
   return [...rest, cubicUpTo(last, t)]
 }
 
-// the parameter that leaves `by` px of the curve unwalked, found by stepping back along it
+// the parameter that leaves `by` px of the curve unwalked, found by stepping back along it.
+//
+// the step it lands *between* has to be interpolated rather than rounded to: a cubic's speed at
+// its end is three times the reach of the handle there, so on a long arc a single step of the
+// parameter covers tens of pixels. stopping at whichever sample first passed `by` left the line
+// short of the arrowhead by most of a step - up to 18px on the reference role, which is what made
+// some arrows look detached from their line while every straight one sat flush
+const TRIM_STEPS = 64
+
 function cubicTrim(segment: Seg & { kind: 'cubic' }, by: number): number {
   let walked = 0
   let previous = segment.b
-  for (let step = 1; step <= 40; step += 1) {
-    const t = 1 - step / 40
+  let previousT = 1
+  for (let step = 1; step <= TRIM_STEPS; step += 1) {
+    const t = 1 - step / TRIM_STEPS
     const point = cubicAt(segment, t)
-    walked += distance(previous, point)
-    previous = point
-    if (walked >= by) {
-      return t
+    const leg = distance(previous, point)
+    if (walked + leg >= by) {
+      return previousT + (t - previousT) * (leg === 0 ? 0 : (by - walked) / leg)
     }
+    walked += leg
+    previous = point
+    previousT = t
   }
+  // the whole curve is shorter than the arrowhead: keep a tenth of it, so the line still points
+  // the way it arrived rather than inverting
   return 0.1
 }
 
