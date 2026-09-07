@@ -1,4 +1,4 @@
-import { BOX_HEIGHT, BOW, type Layout, type Point, type RoutedEdge } from './layout'
+import { BOX_HEIGHT, BOW, type Point, type RoutedEdge } from './layout'
 
 // where an edge actually runs, in pixels. layout.ts has already decided everything that needs
 // deciding - which shape, which gutter, which track, and the two points on the borders - so this
@@ -12,17 +12,13 @@ import { BOX_HEIGHT, BOW, type Layout, type Point, type RoutedEdge } from './lay
 // the run has zero length and the two bends meet, which is one smooth bow and needs no special
 // case
 
+// the least a bow reaches before it turns, so a two-way pair between neighbouring rounds still
+// reads as two curves rather than as two kinked lines
+const BOW_REACH = 16
+
 export type Seg =
   | { kind: 'line'; a: Point; b: Point }
   | { kind: 'cubic'; a: Point; c1: Point; c2: Point; b: Point }
-
-// the least a bend reaches before it turns, so a bend between two nearly-level points still
-// reads as a curve rather than as a corner
-const MIN_REACH = 16
-
-// how much of the vertical gap a bend's handles take. below 1/2 the curve straightens out early
-// and kinks where it meets the run; much above and it overshoots its own track
-const REACH = 0.55
 
 // the arrowhead is drawn as a polygon rather than with an SVG marker, because a marker is pinned
 // to the path's end by a refX that puts the head's *tip* where the line stops. the head's edges
@@ -44,7 +40,7 @@ export function arrowHalfWidth(stroke: number): number {
 }
 
 // the segments an edge is built from, in order
-export function segmentsOf(edge: RoutedEdge, layout: Layout): Seg[] {
+export function segmentsOf(edge: RoutedEdge): Seg[] {
   if (edge.shape === 'straight') {
     return [{ kind: 'line', a: edge.from, b: edge.to }]
   }
@@ -52,7 +48,7 @@ export function segmentsOf(edge: RoutedEdge, layout: Layout): Seg[] {
   if (edge.shape === 'bow') {
     // one cubic leaning to this half's own side, so the pair encloses a lens rather than sharing
     // the line they would both otherwise take
-    const reach = Math.max(MIN_REACH, Math.abs(edge.to.y - edge.from.y) * 0.4)
+    const reach = Math.max(BOW_REACH, Math.abs(edge.to.y - edge.from.y) * 0.4)
     const dir = Math.sign(edge.to.y - edge.from.y) || 1
     return [
       {
@@ -65,48 +61,34 @@ export function segmentsOf(edge: RoutedEdge, layout: Layout): Seg[] {
     ]
   }
 
-  // a curve: out of the border, down (or up) the track, back in
-  const dir = Math.sign(edge.runTo.y - edge.runFrom.y) || Math.sign(edge.to.y - edge.from.y) || 1
-  const out = normalAt(edge.from, edge.source, layout)
-  const back = normalAt(edge.to, edge.target, layout)
-
-  const reachOut = Math.max(MIN_REACH, Math.abs(edge.runFrom.y - edge.from.y) * REACH)
-  const reachBack = Math.max(MIN_REACH, Math.abs(edge.to.y - edge.runTo.y) * REACH)
-
-  const segments: Seg[] = [
+  // a curve: one cubic that leaves its border heading straight out, bulges to its track, and comes
+  // back in square at the other end. each handle points along its own border's outward normal,
+  // which is what makes the shape a C rather than an S and what stops it kinking where it meets a
+  // box.
+  //
+  // a Bezier never escapes the box drawn around its endpoints and its handles, so how far out the
+  // handles reach is what the apex is worth: for a symmetric cubic the midpoint sits a quarter of
+  // the way from the endpoints to the handles, which is where the 4/3 comes from. put the handles
+  // there and the widest point of the curve lands exactly on the track.
+  //
+  // an end that had to leave through its underside instead reaches downward rather than sideways,
+  // and is held to the vertical room it actually has, or it would shoot past its own target
+  const middle = (edge.from.x + edge.to.x) / 2
+  const reach = (Math.abs(edge.trackX - middle) * 4) / 3
+  const drop = Math.min(reach, Math.abs(edge.to.y - edge.from.y) * 0.6)
+  const handle = (end: Point, out: Point): Point => ({
+    x: end.x + out.x * reach,
+    y: end.y + out.y * drop,
+  })
+  return [
     {
       kind: 'cubic',
       a: edge.from,
-      c1: { x: edge.from.x + out.x * reachOut, y: edge.from.y + out.y * reachOut },
-      c2: { x: edge.runFrom.x, y: edge.runFrom.y - dir * reachOut },
-      b: edge.runFrom,
+      c1: handle(edge.from, edge.fromOut),
+      c2: handle(edge.to, edge.toOut),
+      b: edge.to,
     },
   ]
-  if (Math.abs(edge.runTo.y - edge.runFrom.y) > 0.5) {
-    segments.push({ kind: 'line', a: edge.runFrom, b: edge.runTo })
-  }
-  segments.push({
-    kind: 'cubic',
-    a: edge.runTo,
-    c1: { x: edge.runTo.x, y: edge.runTo.y + dir * reachBack },
-    c2: { x: edge.to.x + back.x * reachBack, y: edge.to.y + back.y * reachBack },
-    b: edge.to,
-  })
-  return segments
-}
-
-// which way is out of the box at this point. a bend leaves along it, so an edge that attached to
-// a side border turns away sideways rather than being dragged downward first
-function normalAt(point: Point, nodeId: string, layout: Layout): Point {
-  const node = layout.nodes.find((candidate) => candidate.id === nodeId)
-  if (node === undefined) {
-    return { x: 0, y: 1 }
-  }
-  const dx = (point.x - node.x) / (layout.box.w / 2)
-  const dy = (point.y - node.y) / (layout.box.h / 2)
-  return Math.abs(dx) > Math.abs(dy)
-    ? { x: Math.sign(dx) || 1, y: 0 }
-    : { x: 0, y: Math.sign(dy) || 1 }
 }
 
 // the path as SVG, stopped short by `trim` px so the line ends where the arrowhead's base begins

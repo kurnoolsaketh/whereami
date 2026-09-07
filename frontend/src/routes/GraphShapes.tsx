@@ -18,7 +18,7 @@ export function GraphShapes() {
           <div>
             <h2>Graph shapes</h2>
             <p className="subtitle">
-              fixtures, not data — drag to pan, scroll to zoom, click a line or a round
+              fixtures, not data — drag to pan, ⌘ or ctrl and scroll to zoom, click a line or a round
             </p>
           </div>
         </div>

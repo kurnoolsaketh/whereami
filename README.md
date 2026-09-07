@@ -95,8 +95,9 @@ numbers in a sample chip.
   every other edge. Arrowheads carry the direction.
 - A line is **straight whenever a straight line fits**: down to the round below, or diagonally
   across open space to an outcome. It curves only where the straight version would cut through
-  another round's box — and then it leaves the column entirely, sweeps down a gutter beside it,
-  and comes back, rather than threading between the boxes.
+  another round's box — and then it leaves the round through its *side*, sweeps out into a gutter
+  beside the column in one clean bow, and comes back in the same way, rather than threading
+  between the boxes.
 - Where two rounds have traffic **both ways**, neither line is straight: they bend apart to
   opposite sides and enclose a narrow lens, so the two arrowheads never crowd each other.
 - **Curves nest rather than cross.** The two gutters carry as near to half the curves each as the
@@ -110,7 +111,8 @@ numbers in a sample chip.
   drawn at all.
 - The panel **grows with the pipeline**, up to a point: a role with a few rounds is as compact as
   ever, a long one gets the height instead of being scaled down, and beyond that it pans and
-  zooms.
+  zooms — hold ctrl or cmd while scrolling, or use the buttons, so that scrolling the page past a
+  graph does not zoom it.
 
 ### Stage and status are two different things
 

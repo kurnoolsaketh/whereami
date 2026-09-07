@@ -106,12 +106,18 @@ export function usePanZoom(bounds: Bounds, padding: number, refit: string): PanZ
     [zoomAt, size],
   )
 
+  // a plain wheel scrolls the page, and only ctrl or cmd zooms. the graph sits partway down a
+  // scrolling page - and the fixture route stacks seven of them - so a graph that swallowed the
+  // wheel would trap the reader inside it. taking the wheel *without* swallowing it is worse
+  // still: the page scrolls and the graph zooms at the same time. a trackpad pinch arrives as a
+  // wheel event with ctrlKey set, so this is also what makes pinch-to-zoom work
   const onWheel = useCallback(
     (event: React.WheelEvent) => {
       const box = ref.current?.getBoundingClientRect()
-      if (box === undefined) {
+      if (box === undefined || (!event.ctrlKey && !event.metaKey)) {
         return
       }
+      event.preventDefault()
       zoomAt(
         event.clientX - box.left,
         event.clientY - box.top,

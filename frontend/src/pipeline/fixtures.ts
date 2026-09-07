@@ -87,6 +87,18 @@ export const SHAPES: Shape[] = [
     ],
   },
   {
+    name: 'A wide fork',
+    note: 'three rounds share a row, so the middle one is boxed in on both sides and its arc has to leave through a corner',
+    pipelines: [
+      at([A, H, T, O], 3),
+      at([A, B, T, O], 3),
+      at([A, R, T, O], 3),
+      at([A, H, O], 2),
+      at([A, R, O], 2),
+      at([A, B, T, O], 3, 'REJECTED'),
+    ],
+  },
+  {
     name: 'A long cycle',
     note: 'three applicants who disagree about the order, so the rounds close a loop between them',
     pipelines: [

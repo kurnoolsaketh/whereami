@@ -185,7 +185,7 @@ export function PipelineGraph({ graph, selected, onSelect }: PipelineGraphProps)
 // cannot be placed until every path exists to be measured against
 function draw(layout: Layout): Drawn[] {
   const segments = new Map<string, Seg[]>(
-    layout.edges.map((edge) => [edge.id, segmentsOf(edge, layout)]),
+    layout.edges.map((edge) => [edge.id, segmentsOf(edge)]),
   )
   const polylines = new Map<string, Point[]>(
     [...segments].map(([id, list]) => [id, polylineOf(list)]),

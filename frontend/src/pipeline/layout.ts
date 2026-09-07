@@ -52,13 +52,15 @@ export interface RoutedEdge extends GraphEdge {
   trackX: number
   // bow only: which way this half of the pair bends
   bowDir: -1 | 0 | 1
-  // where it leaves and where it arrives, on the two borders
+  // where it leaves and where it arrives, and the direction the line sets off in at each end. a
+  // curve's handle points along it. normally it is the outward normal of the border it met, so
+  // the line leaves square to the box and the curve is a C; an end boxed in by a neighbour on its
+  // own row heads out diagonally instead, which is the only way past a row-mate without a second
+  // bend
   from: Point
   to: Point
-  // curve only: where the two S-bends meet the straight run. equal when the arc is short enough
-  // that the run vanishes and the bends merge into a single smooth bow
-  runFrom: Point
-  runTo: Point
+  fromOut: Point
+  toOut: Point
 }
 
 export interface Layout {
@@ -101,11 +103,10 @@ const CLEARANCE = 10
 // opens on
 export const BOW = 16
 
-// how much of an arc's vertical travel each S-bend takes before the straight run begins. it
-// scales with how far out the track is, because a bend that drops 36px while reaching 160px
-// sideways is not a bend at all - it is a right angle with the corner rounded off
-const BEND_MIN = 22
-const BEND_REACH = 0.7
+// how far from the middle of a side border an arc attaches, towards the way it is travelling. a
+// forward arc leaves low and arrives high, so where a node has an arc coming in and another going
+// out on the same side, the two do not have to cross to reach their own ends
+const SIDE_BIAS = 11
 
 // the least distance between two attachments on one node's perimeter: an arrowhead's width at
 // the thickest stroke, so two lines arriving side by side never share a point
@@ -163,7 +164,27 @@ export function layoutGraph(graph: Graph): Layout {
   // place it joins its track for a curve. so a curve leaves already heading the way it will
   // travel and nothing kinks at the border
   const attachments: { node: string; edge: string; end: 'from' | 'to'; point: Point }[] = []
-  const geometry = new Map<string, { from: Point; to: Point; runFrom: Point; runTo: Point }>()
+  interface Ends {
+    from: Point
+    to: Point
+    // where each end was aiming, and whether it had to aim diagonally to get past a row-mate.
+    // kept because the ports may still be nudged, and the direction has to follow the port
+    fromAim: Point
+    toAim: Point
+    fromBoxed: boolean
+    toBoxed: boolean
+  }
+  const geometry = new Map<string, Ends>()
+
+  // is anything on this node's own row standing between it and that gutter? an arc leaves its
+  // side border travelling horizontally, so it cannot use a side that has a neighbour on it
+  const boxedIn = (node: PlacedNode, towards: number): boolean =>
+    placed.some(
+      (other) =>
+        other.depth === node.depth &&
+        other.id !== node.id &&
+        (towards < node.x ? other.x < node.x : other.x > node.x),
+    )
 
   for (const edge of graph.edges) {
     const source = at.get(edge.source)
@@ -177,23 +198,27 @@ export function layoutGraph(graph: Graph): Layout {
 
     let aimFrom: Point
     let aimTo: Point
-    let runFrom: Point = source
-    let runTo: Point = target
+    let fromBoxed = false
+    let toBoxed = false
 
     if (shape === 'curve') {
-      // down for a forward arc, up for one closing a cycle. a same-row arc has no vertical
-      // travel at all and simply reaches sideways
+      // straight out to the side, so the ray meets a left or right border and the curve leaves it
+      // square. the small vertical bias is the only thing that distinguishes the two ends: down
+      // for a forward arc, up for one closing a cycle.
+      //
+      // an end that is boxed in on that side - the middle node of a row of three, where no
+      // horizontal exit avoids a neighbour - drops out of its underside or arrives through its
+      // top instead. the two handles do not have to match, and a bow with one vertical end is
+      // still a bow rather than the S this shape exists to be rid of
       const dir = Math.sign(target.y - source.y) || 1
-      const out = Math.max(Math.abs(x - source.x), Math.abs(x - target.x))
-      // never more than half the vertical travel, or the two bends would cross over each other
-      const bend = Math.min(
-        Math.abs(target.y - source.y) / 2,
-        Math.max(BEND_MIN, out * BEND_REACH),
-      )
-      runFrom = { x, y: source.y + dir * bend }
-      runTo = { x, y: target.y - dir * bend }
-      aimFrom = runFrom
-      aimTo = runTo
+      fromBoxed = boxedIn(source, x)
+      toBoxed = boxedIn(target, x)
+      // a boxed-in end aims out *and* along, so it leaves through a bottom or top corner heading
+      // diagonally: past its row-mate because it is already below the row, and past whatever is
+      // in the next row because it is already out towards the gutter. it costs a slight kink at
+      // that one border, which is the price of not adding a second bend
+      aimFrom = { x, y: source.y + dir * (fromBoxed ? box.h * 1.6 : SIDE_BIAS) }
+      aimTo = { x, y: target.y - dir * (toBoxed ? box.h * 1.6 : SIDE_BIAS) }
     } else if (shape === 'bow') {
       // both ends aim at one point pushed off the shared line, so the two ports sit on the same
       // side of it and the curve opens rather than crossing itself
@@ -208,7 +233,7 @@ export function layoutGraph(graph: Graph): Layout {
 
     const from = border(source, aimFrom, box)
     const to = border(target, aimTo, box)
-    geometry.set(edge.id, { from, to, runFrom, runTo })
+    geometry.set(edge.id, { from, to, fromAim: aimFrom, toAim: aimTo, fromBoxed, toBoxed })
     attachments.push({ node: edge.source, edge: edge.id, end: 'from', point: from })
     attachments.push({ node: edge.target, edge: edge.id, end: 'to', point: to })
   }
@@ -228,8 +253,8 @@ export function layoutGraph(graph: Graph): Layout {
       bowDir: bowOf.get(edge.id) ?? 0,
       from: shot?.from ?? { x: 0, y: 0 },
       to: shot?.to ?? { x: 0, y: 0 },
-      runFrom: shot?.runFrom ?? { x: 0, y: 0 },
-      runTo: shot?.runTo ?? { x: 0, y: 0 },
+      fromOut: heading(shot?.from, shot?.fromAim, at.get(edge.source), shot?.fromBoxed, box),
+      toOut: heading(shot?.to, shot?.toAim, at.get(edge.target), shot?.toBoxed, box),
     }
   })
 
@@ -490,19 +515,24 @@ function hitsRect(
   return true
 }
 
-// THE GUTTER ASSIGNMENT, and it is exactly optimal rather than greedy.
+// THE GUTTER ASSIGNMENT.
 //
-// an arc occupies the rows between its endpoints. colouring those intervals so that no two
-// overlapping ones share a colour needs exactly as many colours as the most arcs live at any one
-// row - interval graphs are perfect, and the greedy pass below, in left-endpoint order, hits that
-// number. each colour class is then a set of arcs that never overlap each other, so the whole
-// class rides in a single track wherever it goes.
+// an arc leaves its node's side border travelling horizontally, so the first thing to settle is
+// which sides it is *allowed* to use: a node with a neighbour between it and a gutter cannot send
+// or receive an arc that way, because the arc would run straight through the neighbour. That is a
+// constraint, not a preference, and it comes before everything else.
+//
+// among the arcs that are free to go either way the assignment is exactly optimal rather than
+// greedy. an arc occupies the rows between its endpoints; colouring those intervals so that no
+// two overlapping ones share a colour needs exactly as many colours as the most arcs live at any
+// one row - interval graphs are perfect, and the greedy pass below, in left-endpoint order, hits
+// that number. each colour class is then a set of arcs that never overlap each other, so the
+// whole class rides in a single track wherever it goes.
 //
 // so the question stops being "which side does this arc take" and becomes "which side does this
-// track take", and dealing k tracks alternately gives each gutter ceil(k/2) or floor(k/2). since
-// at the busiest row those same arcs split over two sides, one side must hold at least half of
-// them - so ceil(omega/2) is a lower bound, and the dealing meets it. neither gutter is ever
-// wider than it has to be.
+// track take", and the free classes are dealt to whichever gutter is shallower, with the way they
+// lean breaking the tie. an arc reaching the rightmost outcome leans right, and sending it down
+// the left gutter would make it cross the whole band twice to get there.
 //
 // within a gutter the longest arc goes furthest out, so an arc nested inside another sits inside
 // it on screen too and the pair reads as concentric arches. the other order forces two crossings
@@ -517,73 +547,114 @@ function assignGutters(
     return { left: Math.min(a, b), right: Math.max(a, b) }
   }
 
+  // which way a class's arcs lean: the mean x of their endpoints
+  const lean = (edge: GraphEdge): number =>
+    ((at.get(edge.source)?.x ?? 0) + (at.get(edge.target)?.x ?? 0)) / 2
+
+  const rows = new Map<number, PlacedNode[]>()
+  for (const node of at.values()) {
+    const bucket = rows.get(node.depth)
+    if (bucket === undefined) {
+      rows.set(node.depth, [node])
+    } else {
+      bucket.push(node)
+    }
+  }
+
+  // is anything on this node's own row standing between it and that gutter?
+  const boxed = (node: PlacedNode, side: -1 | 1): boolean =>
+    (rows.get(node.depth) ?? []).some((other) =>
+      side < 0 ? other.x < node.x : other.x > node.x,
+    )
+  const allows = (edge: GraphEdge, side: -1 | 1): boolean => {
+    const source = at.get(edge.source)
+    const target = at.get(edge.target)
+    return (
+      (source === undefined || !boxed(source, side)) &&
+      (target === undefined || !boxed(target, side))
+    )
+  }
+
   // sorted by the near end, widest first, then by an id that is a property of the role's shape
   // and never of the applicants' arrival order
-  const sorted = [...arcs].sort((a, b) => {
+  const ordered = [...arcs].sort((a, b) => {
     const x = span(a)
     const y = span(b)
     return x.left - y.left || y.right - x.right || compare(a.id, b.id)
   })
 
-  const colour = new Map<string, number>()
-  const classes: GraphEdge[][] = []
-  for (const arc of sorted) {
-    const mine = span(arc)
-    let chosen = 0
-    while (
-      (classes[chosen] ?? []).some((other) => {
-        const theirs = span(other)
-        // touching at a single row is not a clash: one arc ends on a border where the next begins
-        return Math.min(theirs.right, mine.right) > Math.max(theirs.left, mine.left)
-      })
-    ) {
-      chosen += 1
-    }
-    classes[chosen] = [...(classes[chosen] ?? []), arc]
-    colour.set(arc.id, chosen)
+  // a node in the *middle* of a row of three is boxed in on both sides, and no horizontal exit
+  // can avoid a neighbour. it falls through to the free pool and crosses one; the alternative is
+  // to drop it down out of its underside first, which is the S this shape exists to be rid of
+  const only = (edge: GraphEdge): -1 | 1 | 0 => {
+    const left = allows(edge, -1)
+    const right = allows(edge, 1)
+    return left && !right ? -1 : right && !left ? 1 : 0
   }
 
-  // which way a class's arcs lean: the mean x of their endpoints. an arc between two nodes in the
-  // middle of the band leans nowhere and can take either gutter, but one reaching the rightmost
-  // outcome leans right, and sending it down the left gutter would make it cross the entire band
-  // twice to get there - which is exactly what "a curve never threads between two boxes" is meant
-  // to prevent
-  const lean = (edge: GraphEdge): number =>
-    ((at.get(edge.source)?.x ?? 0) + (at.get(edge.target)?.x ?? 0)) / 2
+  // greedy interval colouring: the lowest level nothing overlapping is already using
+  const colour = (members: GraphEdge[]): GraphEdge[][] => {
+    const classes: GraphEdge[][] = []
+    for (const arc of members) {
+      const mine = span(arc)
+      let chosen = 0
+      while (
+        (classes[chosen] ?? []).some((other) => {
+          const theirs = span(other)
+          // touching at a single row is not a clash: one arc ends on a border where the next
+          // begins
+          return Math.min(theirs.right, mine.right) > Math.max(theirs.left, mine.left)
+        })
+      ) {
+        chosen += 1
+      }
+      classes[chosen] = [...(classes[chosen] ?? []), arc]
+    }
+    return classes
+  }
 
-  const summary = classes.map((members, index) => ({
+  const held: Record<-1 | 1, GraphEdge[][]> = {
+    [-1]: colour(ordered.filter((arc) => only(arc) === -1)),
+    [1]: colour(ordered.filter((arc) => only(arc) === 1)),
+  }
+
+  const free = colour(ordered.filter((arc) => only(arc) === 0)).map((members, index) => ({
     index,
     members,
     size: members.length,
-    widest: Math.max(0, ...members.map((edge) => span(edge).right - span(edge).left)),
-    first: Math.min(Infinity, ...members.map((edge) => span(edge).left)),
     lean: members.reduce((sum, edge) => sum + lean(edge), 0) / members.length,
   }))
 
-  // split the classes by which way they lean, so each gutter gets half of them - the count that
-  // makes the dealing optimal - and gets the half that actually wants to be there.
-  //
-  // the quota depends on the class's own lean, which is what makes an odd split fall the right
-  // way: with a single arc reaching the rightmost outcome, a fixed ceil(k/2) quota would send it
-  // down the left gutter and make it cross the entire band twice to get where it is going
-  const dealt = [...summary].sort(
-    (a, b) => a.lean - b.lean || b.size - a.size || a.first - b.first || a.index - b.index,
-  )
-  const sides = new Map<number, -1 | 1>()
-  dealt.forEach((klass, index) => {
-    const quota =
-      klass.lean <= 0 ? Math.ceil(dealt.length / 2) : Math.floor(dealt.length / 2)
-    sides.set(klass.index, index < quota ? -1 : 1)
-  })
+  // largest class first, so the biggest commitment is made while both gutters are still shallow
+  for (const klass of [...free].sort(
+    (a, b) => b.size - a.size || a.lean - b.lean || a.index - b.index,
+  )) {
+    const side: -1 | 1 =
+      held[-1].length < held[1].length
+        ? -1
+        : held[1].length < held[-1].length
+          ? 1
+          : klass.lean <= 0
+            ? -1
+            : 1
+    held[side].push(klass.members)
+  }
 
   const result = new Map<string, { side: -1 | 1; track: number }>()
   for (const side of [-1, 1] as const) {
-    const mine = summary
-      .filter((klass) => sides.get(klass.index) === side)
-      // nearest the band first, so the longest arc ends up furthest out
-      .sort((a, b) => a.widest - b.widest || a.first - b.first || a.index - b.index)
-    mine.forEach((klass, track) => {
-      for (const arc of klass.members) {
+    const widest = (members: GraphEdge[]): number =>
+      Math.max(0, ...members.map((edge) => span(edge).right - span(edge).left))
+    const first = (members: GraphEdge[]): number =>
+      Math.min(Infinity, ...members.map((edge) => span(edge).left))
+    // nearest the band first, so the longest arc ends up furthest out
+    const sorted = [...held[side]].sort(
+      (a, b) =>
+        widest(a) - widest(b) ||
+        first(a) - first(b) ||
+        compare(a[0]?.id ?? '', b[0]?.id ?? ''),
+    )
+    sorted.forEach((members, track) => {
+      for (const arc of members) {
         result.set(arc.id, { side, track })
       }
     })
@@ -600,6 +671,33 @@ function bandOf(nodes: PlacedNode[], box: Box): { left: number; right: number } 
     left: Math.min(...nodes.map((node) => node.x)) - box.w / 2,
     right: Math.max(...nodes.map((node) => node.x)) + box.w / 2,
   }
+}
+
+// the direction the line sets off in at one end. normally the outward normal of the border it
+// landed on - whichever of its two offsets is proportionally the larger, which is exactly the test
+// `border` used to put it there - so the line leaves square to the box. an end that had to aim
+// diagonally past a row-mate follows its aim instead, kink and all
+function heading(
+  point: Point | undefined,
+  aim: Point | undefined,
+  node: Point | undefined,
+  boxed: boolean | undefined,
+  box: Box,
+): Point {
+  if (point === undefined || node === undefined) {
+    return { x: 0, y: 1 }
+  }
+  if (boxed === true && aim !== undefined) {
+    const length = Math.hypot(aim.x - point.x, aim.y - point.y)
+    if (length > 0) {
+      return { x: (aim.x - point.x) / length, y: (aim.y - point.y) / length }
+    }
+  }
+  const dx = (point.x - node.x) / (box.w / 2)
+  const dy = (point.y - node.y) / (box.h / 2)
+  return Math.abs(dx) > Math.abs(dy)
+    ? { x: Math.sign(dx) || 1, y: 0 }
+    : { x: 0, y: Math.sign(dy) || 1 }
 }
 
 // where a ray from the centre of a box towards `aim` crosses its border
@@ -665,7 +763,7 @@ function spreadPorts(
   attachments: { node: string; edge: string; end: 'from' | 'to'; point: Point }[],
   at: Map<string, PlacedNode>,
   box: Box,
-  geometry: Map<string, { from: Point; to: Point; runFrom: Point; runTo: Point }>,
+  geometry: Map<string, { from: Point; to: Point }>,
 ): void {
   const perimeter = 2 * (box.w + box.h)
   const byNode = new Map<string, typeof attachments>()
